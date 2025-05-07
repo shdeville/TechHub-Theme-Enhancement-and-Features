@@ -3,7 +3,7 @@ function displayStockNumber() {
     let intervalId; // Declare the interval ID for global access
 
     // Fetch the JSON file containing stock levels
-    fetch('https://store-jsj7fos9p1.mybigcommerce.com/content/JSON%20Files/filteredResponse.json')
+    fetch('https://store-jje9unvzjs.mybigcommerce.com/content/Scripts/Testing/filteredResponse_VARIANTTESTING.json')
         .then(response => response.json())
         .then(data => {
             // Function to get the current SKU
@@ -95,7 +95,7 @@ function displayStockNumber() {
                         message = "Item is on backorder. Order fulfillment will be delayed.";
                     } else if (inputValue > 9 && !closeOut) {
                         // Bulk order logic for non-closeout items
-                        message = `Ordering 10+ items is a bulk order. <a href="https://tamu.mybigcommerce.com/faqs/#:~:text=How%20do%20you%20place%20a%20bulk%20order%3F" target="_blank" rel="noopener noreferrer">Click here</a> to learn more. <br><br><br>`;
+                        message = `Ordering 10+ items is a bulk order. <a href="https://techhubtest.mybigcommerce.com/faqs/#:~:text=How%20do%20you%20place%20a%20bulk%20order%3F" target="_blank" rel="noopener noreferrer">Click here</a> to learn more. <br><br><br>`;
                     } else if (inputValue > stockNumber) {
                         // Exceeded stock logic for closeout items
                         const exceededQuantity = inputValue - stockNumber;

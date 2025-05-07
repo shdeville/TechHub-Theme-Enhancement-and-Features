@@ -118,7 +118,7 @@ style.innerHTML = `
     }
 
     /* Style for the SALE button (assuming it's the 7th item) */
-    .navPages-list > .navPages-item:nth-child(5) > .navPages-action {
+    .navPages-list > .navPages-item:nth-child(6) > .navPages-action {
         color: #500000 !important;
         font-weight: 900 !important;
     }
