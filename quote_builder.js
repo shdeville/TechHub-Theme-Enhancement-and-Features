@@ -100,7 +100,7 @@ document.addEventListener('click', function(event) {
                 const titleAnchor = document.createElement('a');
                 titleAnchor.href = titleLink.href;
                 titleAnchor.textContent = titleLink.innerText.trim();
-                titleAnchor.style.borderBottomColor = 'transparent'; // Remove underline from the link
+                titleAnchor.style.borderBottomColor = 'transparent'; // Remove underline
                 titleCell.appendChild(titleAnchor);
             } else {
                 titleCell.textContent = item.querySelector('.cart-item-title')?.innerText.trim() || '';
@@ -111,14 +111,30 @@ document.addEventListener('click', function(event) {
             options.forEach(option => {
                 const optionsDiv = document.createElement('div');
                 optionsDiv.textContent = option.innerText.trim();
-                optionsDiv.style.fontSize = '12px'; // Smaller font size
-                optionsDiv.style.color = '#333'; // Adjust color if needed
-                optionsDiv.style.marginTop = '7px'; // Small margin from the title
-                optionsDiv.style.paddingLeft = '10px'; // Indent the options text
+                optionsDiv.style.fontSize = '12px';
+                optionsDiv.style.color = '#333';
+                optionsDiv.style.marginTop = '7px';
+                optionsDiv.style.paddingLeft = '10px';
                 titleCell.appendChild(optionsDiv);
             });
 
-            // Add titleCell (with options) to the row
+            // Get detailed specs from the definitionList (CPU, GPU, RAM, Storage)
+            const specDl = item.querySelector('.definitionList');
+            if (specDl) {
+                specDl.querySelectorAll('dt.definitionList-key').forEach(dt => {
+                    const dd = dt.nextElementSibling;
+                    if (!dd) return;
+                    const specDiv = document.createElement('div');
+                    specDiv.style.fontSize = '12px';
+                    specDiv.style.color = '#333';
+                    specDiv.style.marginTop = '4px';
+                    specDiv.style.paddingLeft = '10px';
+                    specDiv.textContent = `${dt.textContent.trim()} ${dd.textContent.trim()}`;
+                    titleCell.appendChild(specDiv);
+                });
+            }
+
+            // Add titleCell (with options & specs) to the row
             itemRow.appendChild(titleCell);
 
             // Get the SKU
@@ -128,7 +144,7 @@ document.addEventListener('click', function(event) {
             skuCell.style.border = '1px solid #000';
             skuCell.style.padding = '8px';
             skuCell.style.textAlign = 'left';
-            skuCell.style.verticalAlign = 'middle'; // Center vertically
+            skuCell.style.verticalAlign = 'middle';
             itemRow.appendChild(skuCell);
 
             // Get the price
@@ -138,45 +154,36 @@ document.addEventListener('click', function(event) {
             priceCell.style.border = '1px solid #000';
             priceCell.style.padding = '8px';
             priceCell.style.textAlign = 'right';
-            priceCell.style.verticalAlign = 'middle'; // Center vertically
+            priceCell.style.verticalAlign = 'middle';
             itemRow.appendChild(priceCell);
 
             // Get the quantity
             const quantity = item.querySelector('.cart-item-block.cart-item-info.cart-item-quantity .form-increment .form-input');
             const quantityCell = document.createElement('td');
-            quantityCell.textContent = quantity ? quantity.value.trim() : ''; // Assuming it's an input field
+            quantityCell.textContent = quantity ? quantity.value.trim() : '';
             quantityCell.style.border = '1px solid #000';
             quantityCell.style.padding = '8px';
             quantityCell.style.textAlign = 'right';
-            quantityCell.style.verticalAlign = 'middle'; // Center vertically
+            quantityCell.style.verticalAlign = 'middle';
             itemRow.appendChild(quantityCell);
 
-            // --- calculate the line total from price and quantity ---
-            // priceCell and quantityCell have already been created and appended
-
-            // 1. grab the raw text
-            const priceText    = priceCell.textContent;              // e.g. "$19.99"
-            const quantityText = quantityCell.textContent;           // e.g. "3"
-
-            // 2. strip non-numeric characters and parse
-            const priceValue    = parseFloat(priceText.replace(/[^0-9.-]+/g, '')) || 0;
-            const quantityValue = parseInt(quantityText, 10)          || 0;
-
-            // 3. multiply
-            const lineTotal = priceValue * quantityValue;
-
-            // 4. format it back into currency (here USD; change if you need another)
+            // Calculate the line total from price and quantity
+            const priceText    = priceCell.textContent;              
+            const quantityText = quantityCell.textContent;           
+            const priceValue   = parseFloat(priceText.replace(/[^0-9.-]+/g, '')) || 0;
+            const quantityValue= parseInt(quantityText, 10)           || 0;
+            const lineTotal    = priceValue * quantityValue;
             const totalFormatted = new Intl.NumberFormat(undefined, {
-            style:    'currency',
-            currency: 'USD'
+                style:    'currency',
+                currency: 'USD'
             }).format(lineTotal);
 
-            // 5. build and append the cell
+            // Build and append the Total cell
             const totalCell = document.createElement('td');
             totalCell.textContent = totalFormatted;
-            totalCell.style.border        = '1px solid #000';
-            totalCell.style.padding       = '8px';
-            totalCell.style.textAlign     = 'right';
+            totalCell.style.border = '1px solid #000';
+            totalCell.style.padding = '8px';
+            totalCell.style.textAlign = 'right';
             totalCell.style.verticalAlign = 'middle';
             itemRow.appendChild(totalCell);
 
@@ -186,7 +193,7 @@ document.addEventListener('click', function(event) {
         // Append the table to a container
         const container = document.createElement('div');
         container.id = 'pdf-container';
-        container.appendChild(headerContainer); // Add header to the container
+        container.appendChild(headerContainer);
         container.appendChild(table);
 
         // Add grand total separately
@@ -199,7 +206,7 @@ document.addEventListener('click', function(event) {
 
             const grandTotalLabel = document.createElement('span');
             grandTotalLabel.textContent = 'Grand Total: ';
-            grandTotalLabel.style.marginRight = '10px'; // Add space between label and value
+            grandTotalLabel.style.marginRight = '10px';
             grandTotalContainer.appendChild(grandTotalLabel);
 
             const grandTotalValue = document.createElement('span');
@@ -218,9 +225,16 @@ document.addEventListener('click', function(event) {
         footerContainer.style.textAlign = 'center';
 
         const disclaimer = document.createElement('div');
-        disclaimer.innerHTML = '<p><strong>Pricing and stock are subject to change.</strong> Quote pricing will be honored for 14 days while inventory lasts.</p><p>An approved purchaser can log in to <a href="https://techhub.tamu.edu/" style="font-size: 12px;">TechHub</a> to complete the purchase. See <a href="https://tamu.mybigcommerce.com/terms-and-conditions/" style="font-size: 12px;">Terms and Conditions.</a></p>';
+        disclaimer.innerHTML = 
+            '<p><strong>Pricing and stock are subject to change.</strong> ' +
+            'Quote pricing will be honored for 14 days while inventory lasts.</p>' +
+            '<p>An approved purchaser can log in to ' +
+            '<a href="https://techhub.tamu.edu/" style="font-size: 12px;">TechHub</a> ' +
+            'to complete the purchase. See ' +
+            '<a href="https://tamu.mybigcommerce.com/terms-and-conditions/" ' +
+            'style="font-size: 12px;">Terms and Conditions.</a></p>';
         footerContainer.appendChild(disclaimer);
-        container.appendChild(footerContainer); // Add footer to the container
+        container.appendChild(footerContainer);
 
         // Options for generating the PDF
         const opt = {
@@ -239,14 +253,18 @@ document.addEventListener('click', function(event) {
                 pdf.setPage(i);
                 pdf.setFontSize(10);
                 pdf.setTextColor(150);
-                pdf.text(`Page ${i} of ${totalPages}`, pdf.internal.pageSize.getWidth() - 20, pdf.internal.pageSize.getHeight() - 10);
+                pdf.text(
+                    `Page ${i} of ${totalPages}`,
+                    pdf.internal.pageSize.getWidth() - 20,
+                    pdf.internal.pageSize.getHeight() - 10
+                );
             }
         }).save();
     }
 
     // Send Quote functionality
     if (event.target && event.target.id === 'send-quote') {
-        event.preventDefault(); // Prevent default behavior only for "Send Quote" button
+        event.preventDefault();
         console.log("Send Quote button clicked");
 
         // Your logic for sending the quote goes here...
