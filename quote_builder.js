@@ -1,3 +1,4 @@
+//Staging Version
 // Function to set a cookie
 function setCookie(name, value, days) {
     let expires = "";
