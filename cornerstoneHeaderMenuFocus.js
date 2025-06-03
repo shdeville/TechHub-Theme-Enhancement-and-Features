@@ -7,14 +7,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Inject the CSS for the dropdown menus
     const style = document.createElement('style');
 style.innerHTML = `
-
-
-	/* Hide the first item in the normal header navigation */
-	#left-nav > .navPages-item:nth-child(1) {
-    display: none !important;
-	}
-
-
     /* General submenu styling */
     .navPage-subMenu {
         background-color: #ffffff !important;
@@ -126,40 +118,10 @@ style.innerHTML = `
     }
 
     /* Style for the SALE button (assuming it's the 7th item) */
-    .navPages-list > .navPages-item:nth-child(6) > .navPages-action {
+    .navPages-list > .navPages-item:nth-child(5) > .navPages-action {
         color: #500000 !important;
         font-weight: 900 !important;
-	
     }
-	
-	/* ─────────────────────────────────────────────────────────────────────────────
-	   1) FORCE DEFAULT / “CURRENT” STATES TO BLACK + TRANSPARENT BACKGROUND
-	   (only default & “current” – *not* hover/focus/active)
-	   ───────────────────────────────────────────────────────────────────────────── */
-	.navPage-subMenu-action,
-	.navPage-subMenu-action:link,
-	.navPage-subMenu-action:visited,
-	.navPage-subMenu-item.is-active > .navPage-subMenu-action,
-	.navPage-subMenu-item.is-current > .navPage-subMenu-action,
-	.navPage-subMenu-action[aria-current="true"] {
-	  color: #000000 !important;
-	  background-color: transparent !important;
-	  
-	  text-decoration: none !important;
-	}
-
-	/* ─────────────────────────────────────────────────────────────────────────────
-	   2) RE-ENABLE YOUR HOVER/FORCE-HIGHLIGHT *AFTER* the big override
-	   (must come last or be more specific)
-	   ───────────────────────────────────────────────────────────────────────────── */
-	.navPage-subMenu .navPage-subMenu-action:hover,
-	.navPage-subMenu .navPage-subMenu-action:focus,
-	.navPage-subMenu .navPage-subMenu-action:active {
-	  background-color: #ededed !important;
-	  color: #000000 !important;
-	  text-decoration: underline !important;
-	}
-	
 `;
 document.head.appendChild(style);
 
@@ -229,7 +191,6 @@ document.head.appendChild(style);
     var leftNavButton;
 
     // Function to create the "Menu" button
-	
 	function createLeftNavButton() {
 		if (leftNavButtonCreated) return; // Do nothing if already created
 
@@ -266,17 +227,10 @@ document.head.appendChild(style);
 		var subMenuList = document.createElement('ul');
 		subMenuList.className = 'navPage-subMenu-list';
 
-		// Clone the left-nav items and append to the submenu, skipping the first `n`
+		// Clone the left-nav items and append to the submenu
 		var leftNavItems = document.querySelectorAll('#left-nav > .navPages-item');
-		let n = 1; // Number of items to skip
-		let index = 0;
 
 		leftNavItems.forEach(function(item) {
-			if (index < n) {
-				index++;
-				return; // Skip this item
-			}
-
 			// Create a new list item for the submenu
 			var subMenuItem = document.createElement('li');
 			subMenuItem.className = 'navPage-subMenu-item';
@@ -296,8 +250,6 @@ document.head.appendChild(style);
 
 			// Append the submenu item to the submenu list
 			subMenuList.appendChild(subMenuItem);
-
-			index++;
 		});
 
 		// Append the submenu list to the submenu div
@@ -319,7 +271,7 @@ document.head.appendChild(style);
 
 			var isActive = leftNavButton.classList.contains('menu-active');
 
-			// Toggle submenu
+			// Close any open submenus in the "Menu" button
 			leftNavButton.classList.toggle('menu-active', !isActive);
 		});
 
@@ -337,7 +289,6 @@ document.head.appendChild(style);
 
 		leftNavButtonCreated = true;
 	}
-
 
 
     // Function to remove the "Menu" button
