@@ -1,7 +1,6 @@
 function displayStockNumber() {
     let noSkuCounter = 0; // Counter to track the number of times "No SKU available" occurs
     let intervalId; // Declare the interval ID for global access
-
     // Fetch the JSON file containing stock levels
     fetch('https://store-jsj7fos9p1.mybigcommerce.com/content/JSON%20Files/filteredResponse.json')
         .then(response => response.json())
@@ -13,12 +12,10 @@ function displayStockNumber() {
                 );
                 return skuElement ? skuElement.textContent.trim() : null;
             }
-
             // Function to get product data based on SKU
             function getProductData(sku) {
                 return data.find(p => p.sku === sku);
             }
-
             // Function to update the stock message using a real DOM element
             function updateStockMessageInElement(message) {
                 const incrementField = document.querySelector('.form-increment[data-quantity-change]');
@@ -26,13 +23,11 @@ function displayStockNumber() {
                     console.error("Increment field not found.");
                     return;
                 }
-
                 // Check if the message div already exists
                 let messageDiv = document.getElementById('dynamic-increment-message');
                 if (!messageDiv) {
                     messageDiv = document.createElement('div');
                     messageDiv.id = 'dynamic-increment-message';
-
                     // Style the message div
                     messageDiv.style.fontFamily = '"Work Sans", sans-serif';
                     messageDiv.style.fontSize = '15px';
@@ -40,14 +35,11 @@ function displayStockNumber() {
                     messageDiv.style.color = 'black';
                     messageDiv.style.marginTop = '15px';
                     messageDiv.style.textAlign = 'left';
-
                     // Append the message div after the increment field
                     incrementField.parentNode.insertBefore(messageDiv, incrementField.nextSibling);
                 }
-
                 // Update the content of the message div
                 messageDiv.innerHTML = message;
-
                 // Add hover event listeners to pause/resume updates
                 const link = messageDiv.querySelector('a');
                 if (link) {
@@ -55,42 +47,39 @@ function displayStockNumber() {
                     link.addEventListener('mouseleave', resumeUpdating);
                 }
             }
-
             const inputElement = document.querySelector('#qty\\[\\]');
-
             function checkAndUpdateInputValue() {
                 const sku = getCurrentSKU();
                 if (!sku) {
                     noSkuCounter++;
                     console.log("No SKU available, not displaying stock message.");
-
                     // Check if the counter has reached 25
                     if (noSkuCounter >= 25) {
                         console.log("No SKU available 25 times. Terminating script.");
                         clearInterval(intervalId); // Stop the interval
                         return;
                     }
-
                     return;
                 }
-
                 const product = getProductData(sku);
                 if (!product) {
                     console.error("SKU not found in the JSON file.");
                     return;
                 }
-
                 const addToCartButton = document.querySelector('#form-action-addToCart');
-
                 if (inputElement) {
                     const inputValue = parseInt(inputElement.value, 10) || 0;
 
-                    // Always use the stock number from the .json file
-                    const stockNumber = parseFloat(product.Qty);
+                    // === Updated block: compute stockNumber as Qty - bc_status9 - bc_status7 ===
+                    const q = parseFloat(product.Qty) || 0;
+                    const b9 = parseFloat(product.bc_status9) || 0;
+                    const b7 = parseFloat(product.bc_status7) || 0;
+                    const stockNumber = q - b9 - b7;
+                    // === End update ===
+
                     const closeOut = product.Closeout === "Y";
                     let message = '';
                     let disableButton = false;
-
                     if (stockNumber < 1) {
                         message = "Item is on backorder. Order fulfillment will be delayed.";
                     } else if (inputValue > 9 && !closeOut) {
@@ -108,10 +97,8 @@ function displayStockNumber() {
                     } else {
                         message = `In stock. <br><br><br>`;
                     }
-
                     // Update the message using the real DOM element
                     updateStockMessageInElement(message);
-
                     // Handle the Add to Cart button state
                     if (addToCartButton && disableButton) {
                         addToCartButton.disabled = true;
@@ -124,30 +111,24 @@ function displayStockNumber() {
                     }
                 }
             }
-
             // Pause updating the message
             function pauseUpdating() {
                 clearInterval(intervalId);
                 console.log("Paused updates.");
             }
-
             // Resume updating the message
             function resumeUpdating() {
                 intervalId = setInterval(checkAndUpdateInputValue, 50);
                 console.log("Resumed updates.");
             }
-
             // Initialize the interval for updates
             intervalId = setInterval(checkAndUpdateInputValue, 50);
-
             // Function to handle the initial and updated SKUs
             function handleSKUChange() {
                 checkAndUpdateInputValue();
             }
-
             // Initialize with the first SKU check
             handleSKUChange();
-
             // Create a MutationObserver to watch for changes in the SKU element
             const skuElement = document.querySelector(
                 '#main-content > div.container > div > div.productView > section.productView-details.product-data > div > dl:nth-child(1) > dd'
@@ -161,11 +142,9 @@ function displayStockNumber() {
             console.error('Error fetching the JSON file:', error);
         });
 }
-
 document.addEventListener('DOMContentLoaded', function () {
     displayStockNumber();
 });
-
 // Function to disable text highlighting
 function disableTextHighlighting() {
     const addToCartButton = document.querySelector('#form-action-addToCart');
@@ -173,31 +152,25 @@ function disableTextHighlighting() {
         console.error("Add to Cart button not found.");
         return;
     }
-
     function disableHighlighting() {
         document.body.style.userSelect = 'none';
         setTimeout(() => {
             document.body.style.userSelect = '';
         }, 5000);
     }
-
     addToCartButton.addEventListener('click', disableHighlighting);
 }
-
 function makeStockFieldVisible() {
     const stockField = document.querySelector('.form-field.form-field--stock');
-    
     if (stockField) {
         // Locate the span containing the stock value
         const stockSpan = stockField.querySelector('span[data-product-stock]');
         if (stockSpan) {
             const stockValue = parseInt(stockSpan.textContent.trim(), 10); // Parse the stock value as an integer
-            
             if (stockValue > 10) {
                 console.log(`Stock is ${stockValue}, greater than 10. Keeping the element hidden.`);
                 return; // Do nothing if stock is above 10
             }
-
             console.log(`Stock is ${stockValue}, 10 or below. Making the element visible.`);
             stockField.style.display = 'block'; // Ensure the element is displayed
             stockField.style.visibility = 'visible'; // Make the element visible
@@ -208,17 +181,10 @@ function makeStockFieldVisible() {
         console.error("Stock field element not found.");
     }
 }
-
 // Modify the `DOMContentLoaded` event listener to include the updated function
 document.addEventListener('DOMContentLoaded', function () {
     displayStockNumber();
     disableTextHighlighting();
-
     // Call the function to conditionally make the stock field visible
     makeStockFieldVisible();
-});
-
-
-ent.addEventListener('DOMContentLoaded', function () {
-    disableTextHighlighting();
 });
