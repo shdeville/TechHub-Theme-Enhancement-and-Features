@@ -3,7 +3,7 @@ function displayStockNumber() {
     let intervalId; // Declare the interval ID for global access
 
     // Fetch the JSON file containing stock levels
-    fetch('https://store-jje9unvzjs.mybigcommerce.com/content/Scripts/Testing/filteredResponse_VARIANTTESTING.json')
+    fetch('https://store-jje9unvzjs.mybigcommerce.com/content/Scripts/Testing/filteredResponse.json')
         .then(response => response.json())
         .then(data => {
             // Function to get the current SKU
