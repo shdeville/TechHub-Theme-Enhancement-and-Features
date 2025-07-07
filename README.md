@@ -12,3 +12,6 @@ This script fetches stock data from an external JSON file and uses it to display
 
 ## quote_builder.js
 This script generates a downloadable PDF quote from the items currently in the user's shopping cart. When triggered, it creates a styled layout with item details, prices, quantities, totals, and disclaimers, using the html2pdf library to export it. It includes item options and technical specs when available, and appends a footer with pricing terms and links. A secondary action allows users to "send" the quote, redirecting them to a specified page after a short delay.
+
+## carousel.js
+This script automatically advances a carousel on the homepage of TechHub every 10 seconds by simulating a click on the right arrow button. It only runs when the page is visible and the user is not hovering over the carousel. The script pauses the auto-advance if the user hovers over the carousel or switches to a different browser tab, and resumes when appropriate. It also ensures that all necessary event listeners are set up after the page loads, with a fallback retry if the carousel element is not immediately available.
