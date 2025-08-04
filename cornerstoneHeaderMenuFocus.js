@@ -166,12 +166,20 @@ document.head.appendChild(style);
             navAction.addEventListener('click', handleNavButtonClick);
         }
     });
-    // Close normal submenus when clicking outside
-    document.addEventListener('click', function(event) {
-        if (!event.target.closest('.navPages-item')) {
-            removeActiveFromNavItems();
-        }
-    });
+	// Close normal submenus when clicking outside (exclude carousel)
+	document.addEventListener('click', function(event) {
+		// Don't close if event is not user-initiated or if clicking within any carousel
+		if (!event.isTrusted || 
+			event.target.closest('[data-widget-id]') ||
+			event.target.closest('[class*="bc-carousel"]') ||
+			event.target.closest('[id*="sd-carousel"]') ||
+			event.target.closest('[data-test-id*="carousel"]')) {
+			return;
+		}
+		if (!event.target.closest('.navPages-item')) {
+			removeActiveFromNavItems();
+		}
+	});
     // Prevent clicks inside normal submenus from closing them
     function preventSubMenuClickPropagation() {
         const subMenus = document.querySelectorAll('.navPage-subMenu');
@@ -257,11 +265,18 @@ var isActive = leftNavButton.classList.contains('menu-active');
 // Toggle submenu
 leftNavButton.classList.toggle('menu-active', !isActive);
 });
-// Close the "Menu" submenu when clicking outside
+// Close the "Menu" submenu when clicking outside (exclude carousel)
 document.addEventListener('click', function(event) {
-if (!leftNavButton.contains(event.target)) {
-leftNavButton.classList.remove('menu-active');
-}
+    // Don't close if event is not user-initiated or if clicking within any carousel
+    if (!event.isTrusted || 
+        event.target.closest('[data-widget-id]') ||
+        event.target.closest('[class*="bc-carousel"]') ||
+        event.target.closest('[id*="sd-carousel"]') ||
+        event.target.closest('[data-test-id*="carousel"]') ||
+        leftNavButton.contains(event.target)) {
+        return;
+    }
+    leftNavButton.classList.remove('menu-active');
 });
 // Prevent clicks inside submenu from closing it
 subMenuDiv.addEventListener('click', function(event) {
