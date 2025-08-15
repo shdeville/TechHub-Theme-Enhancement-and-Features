@@ -70,33 +70,38 @@ function displayStockNumber() {
                 if (inputElement) {
                     const inputValue = parseInt(inputElement.value, 10) || 0;
 
-                    // === Updated block: compute stockNumber as Qty - bc_status9 - bc_status7 ===
-                    const q = parseFloat(product.Qty) || 0;
-                    const b9 = parseFloat(product.bc_status9) || 0;
-                    const b7 = parseFloat(product.bc_status7) || 0;
-                    const stockNumber = q - b9 - b7;
-                    // === End update ===
+					// === Updated block: compute stockNumber as Qty - bc_status9 - bc_status7 ===
+					const q = parseFloat(product.Qty) || 0;
+					const b9 = parseFloat(product.bc_status9) || 0;
+					const b7 = parseFloat(product.bc_status7) || 0;
+					const stockNumber = q - b9 - b7;
+					// === End update ===
 
-                    const closeOut = product.Closeout === "Y";
-                    let message = '';
-                    let disableButton = false;
-                    if (stockNumber < 1) {
-                        message = "Item is on backorder. Order fulfillment will be delayed.";
-                    } else if (inputValue > 9 && !closeOut) {
-                        // Bulk order logic for non-closeout items
-                        message = `Ordering 10+ items is a bulk order. <a href="https://techhubtest.mybigcommerce.com/faqs/#:~:text=How%20do%20you%20place%20a%20bulk%20order%3F" target="_blank" rel="noopener noreferrer">Click here</a> to learn more. <br><br><br>`;
-                    } else if (inputValue > stockNumber) {
-                        // Exceeded stock logic for closeout items
-                        const exceededQuantity = inputValue - stockNumber;
-                        if (closeOut) {
-                            message = `Limited Inventory - You have exceeded quantity in stock by ${exceededQuantity}.<br>We can only accept orders of quantity ${stockNumber} or less for this product. <br> <br>`;
-                            disableButton = true;
-                        } else {
-                            message = `You have exceeded our in-stock quantity by ${exceededQuantity}.<br>We will fulfill a portion of your order now, but expect a delay in complete order fulfillment.`;
-                        }
-                    } else {
-                        message = `In stock. <br><br><br>`;
-                    }
+					const closeOut = product.Closeout === "Y";
+
+					let message = '';
+					let disableButton = false;
+
+					// Check if SKU contains "SPECIAL" - this takes priority over other conditions
+					if (sku.toUpperCase().includes("SPECIAL")) {
+						message = "Special order items come made-to-order from manufacturers, please expect longer lead times.";
+					} else if (stockNumber < 1) {
+						message = "Item is on backorder. Order fulfillment will be delayed.";
+					} else if (inputValue > 9 && !closeOut) {
+						// Bulk order logic for non-closeout items
+						message = `Ordering 10+ items is a bulk order. <a href="https://techhubtest.mybigcommerce.com/faqs/#:~:text=How%20do%20you%20place%20a%20bulk%20order%3F" target="_blank" rel="noopener noreferrer">Click here</a> to learn more. <br><br><br>`;
+					} else if (inputValue > stockNumber) {
+						// Exceeded stock logic for closeout items
+						const exceededQuantity = inputValue - stockNumber;
+						if (closeOut) {
+							message = `Limited Inventory - You have exceeded quantity in stock by ${exceededQuantity}.<br>We can only accept orders of quantity ${stockNumber} or less for this product. <br> <br>`;
+							disableButton = true;
+						} else {
+							message = `You have exceeded our in-stock quantity by ${exceededQuantity}.<br>We will fulfill a portion of your order now, but expect a delay in complete order fulfillment.`;
+						}
+					} else {
+						message = `In stock. <br><br><br>`;
+					}
                     // Update the message using the real DOM element
                     updateStockMessageInElement(message);
                     // Handle the Add to Cart button state
