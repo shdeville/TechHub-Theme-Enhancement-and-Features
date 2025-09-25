@@ -89,7 +89,7 @@ function displayStockNumber() {
 						message = "Item is on backorder. Order fulfillment will be delayed.";
 					} else if (inputValue > 9 && !closeOut) {
 						// Bulk order logic for non-closeout items
-						message = `Ordering 10+ items is a bulk order. <a href="https://tamu.mybigcommerce.com/faqs/#:~:text=How%20do%20you%20place%20a%20bulk%20order%3F" target="_blank" rel="noopener noreferrer">Click here</a> to learn more. <br><br><br>`;
+						message = `Ordering 10+ items is a bulk order, please expect delays in fulfillment.<br><a href="https://tamu.mybigcommerce.com/faqs/#:~:text=How%20do%20you%20place%20a%20bulk%20order%3F" target="_blank" rel="noopener noreferrer">Click here</a> to learn more. <br><br><br>`;
 					} else if (inputValue > stockNumber) {
 						// Exceeded stock logic for closeout items
 						const exceededQuantity = inputValue - stockNumber;
