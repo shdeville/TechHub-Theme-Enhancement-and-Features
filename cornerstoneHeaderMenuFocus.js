@@ -330,7 +330,7 @@ leftNavButtonCreated = true;
         
         navActions.forEach(action => {
             const text = action.textContent.trim().toLowerCase();
-            if (text === 'sale') {
+            if (text === 'sale' || text === 'fire sale') {
                 action.style.color = '#500000';
                 action.style.fontWeight = '900';
                 action.style.setProperty('color', '#500000', 'important');
