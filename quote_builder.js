@@ -312,7 +312,7 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
   }
 
   const MAX_DOCK_COLUMNS_PER_TABLE = 6;
-  const MAX_COMPUTER_ROWS_PER_TABLE = 18;
+  const MAX_COMPUTER_ROWS_PER_TABLE = 14;
   const dockChunks = chunkArray(cartDocks, MAX_DOCK_COLUMNS_PER_TABLE);
   const computerChunks = chunkArray(cartComputers, MAX_COMPUTER_ROWS_PER_TABLE);
   const notes = [];
@@ -323,14 +323,13 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
       matrixTable.style.width = "100%";
       matrixTable.style.borderCollapse = "collapse";
       matrixTable.style.marginBottom = "10px";
-      matrixTable.style.pageBreakInside = "avoid";
-      matrixTable.style.breakInside = "avoid";
 
       const headerRow = document.createElement("tr");
       const laptopHeader = document.createElement("th");
       laptopHeader.textContent = "Laptop";
       laptopHeader.style.border = "1px solid #000";
-      laptopHeader.style.padding = "8px";
+      laptopHeader.style.padding = "6px";
+      laptopHeader.style.fontSize = "10.5px";
       laptopHeader.style.backgroundColor = "#f2f2f2";
       laptopHeader.style.textAlign = "left";
       headerRow.appendChild(laptopHeader);
@@ -340,7 +339,8 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
         const dockData = docks[dockSku] || {};
         dockHeader.textContent = dockData.name || dockSku;
         dockHeader.style.border = "1px solid #000";
-        dockHeader.style.padding = "8px";
+        dockHeader.style.padding = "6px";
+        dockHeader.style.fontSize = "10.5px";
         dockHeader.style.backgroundColor = "#f2f2f2";
         dockHeader.style.textAlign = "center";
         headerRow.appendChild(dockHeader);
@@ -355,7 +355,8 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
         const computerCell = document.createElement("td");
         computerCell.textContent = computerData.name || computerSku;
         computerCell.style.border = "1px solid #000";
-        computerCell.style.padding = "8px";
+        computerCell.style.padding = "6px";
+        computerCell.style.fontSize = "10.5px";
         computerCell.style.textAlign = "left";
         computerCell.style.fontWeight = "600";
         row.appendChild(computerCell);
@@ -363,7 +364,8 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
         dockChunk.forEach((dockSku) => {
           const compatibilityCell = document.createElement("td");
           compatibilityCell.style.border = "1px solid #000";
-          compatibilityCell.style.padding = "8px";
+          compatibilityCell.style.padding = "6px";
+          compatibilityCell.style.fontSize = "10.5px";
 
           const incompatibleWith = Array.isArray(computerData.incompatibleWith)
             ? computerData.incompatibleWith
