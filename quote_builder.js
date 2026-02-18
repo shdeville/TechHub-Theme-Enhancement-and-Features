@@ -312,7 +312,7 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
   }
 
   const MAX_DOCK_COLUMNS_PER_TABLE = 6;
-  const MAX_COMPUTER_ROWS_PER_TABLE = 14;
+  const MAX_COMPUTER_ROWS_PER_TABLE = 10;
   const dockChunks = chunkArray(cartDocks, MAX_DOCK_COLUMNS_PER_TABLE);
   const computerChunks = chunkArray(cartComputers, MAX_COMPUTER_ROWS_PER_TABLE);
   const notes = [];
@@ -477,56 +477,65 @@ document.addEventListener("click", async function (event) {
     date.style.color = "#000000";
     headerContainer.appendChild(date);
 
-    // Create a table for the PDF content
-    const table = document.createElement("table");
-    table.style.width = "100%";
-    table.style.borderCollapse = "collapse";
+    const QUOTE_ROWS_PER_TABLE = 10;
 
-    // Add table headers
-    const headerRow = document.createElement("tr");
+    function createQuoteTable() {
+      const quoteTable = document.createElement("table");
+      quoteTable.style.width = "100%";
+      quoteTable.style.borderCollapse = "collapse";
+      quoteTable.style.tableLayout = "fixed";
+      quoteTable.style.marginBottom = "10px";
 
-    // Header for Item (spanning two columns)
-    const itemHeader = document.createElement("th");
-    itemHeader.textContent = "Item";
-    itemHeader.style.border = "1px solid #000";
-    itemHeader.style.padding = "8px";
-    itemHeader.style.textAlign = "left";
-    itemHeader.style.backgroundColor = "#f2f2f2";
-    itemHeader.colSpan = 2; // Ensure this spans two columns (for title and SKU)
-    headerRow.appendChild(itemHeader);
+      const columnGroup = document.createElement("colgroup");
+      ["46%", "14%", "14%", "10%", "16%"].forEach((width) => {
+        const column = document.createElement("col");
+        column.style.width = width;
+        columnGroup.appendChild(column);
+      });
+      quoteTable.appendChild(columnGroup);
 
-    // Header for Price
-    const priceHeader = document.createElement("th");
-    priceHeader.textContent = "Price";
-    priceHeader.style.border = "1px solid #000";
-    priceHeader.style.padding = "8px";
-    priceHeader.style.textAlign = "right";
-    priceHeader.style.backgroundColor = "#f2f2f2";
-    headerRow.appendChild(priceHeader);
+      const headerRow = document.createElement("tr");
 
-    // Header for Quantity
-    const quantityHeader = document.createElement("th");
-    quantityHeader.textContent = "Quantity";
-    quantityHeader.style.border = "1px solid #000";
-    quantityHeader.style.padding = "8px";
-    quantityHeader.style.textAlign = "right";
-    quantityHeader.style.backgroundColor = "#f2f2f2";
-    headerRow.appendChild(quantityHeader);
+      const itemHeader = document.createElement("th");
+      itemHeader.textContent = "Item";
+      itemHeader.style.border = "1px solid #000";
+      itemHeader.style.padding = "8px";
+      itemHeader.style.textAlign = "left";
+      itemHeader.style.backgroundColor = "#f2f2f2";
+      itemHeader.colSpan = 2;
+      headerRow.appendChild(itemHeader);
 
-    // Header for Total
-    const totalHeader = document.createElement("th");
-    totalHeader.textContent = "Total";
-    totalHeader.style.border = "1px solid #000";
-    totalHeader.style.padding = "8px";
-    totalHeader.style.textAlign = "right";
-    totalHeader.style.backgroundColor = "#f2f2f2";
-    headerRow.appendChild(totalHeader);
+      const priceHeader = document.createElement("th");
+      priceHeader.textContent = "Price";
+      priceHeader.style.border = "1px solid #000";
+      priceHeader.style.padding = "8px";
+      priceHeader.style.textAlign = "right";
+      priceHeader.style.backgroundColor = "#f2f2f2";
+      headerRow.appendChild(priceHeader);
 
-    // Append the header row to the table
-    table.appendChild(headerRow);
+      const quantityHeader = document.createElement("th");
+      quantityHeader.textContent = "Quantity";
+      quantityHeader.style.border = "1px solid #000";
+      quantityHeader.style.padding = "8px";
+      quantityHeader.style.textAlign = "right";
+      quantityHeader.style.backgroundColor = "#f2f2f2";
+      headerRow.appendChild(quantityHeader);
+
+      const totalHeader = document.createElement("th");
+      totalHeader.textContent = "Total";
+      totalHeader.style.border = "1px solid #000";
+      totalHeader.style.padding = "8px";
+      totalHeader.style.textAlign = "right";
+      totalHeader.style.backgroundColor = "#f2f2f2";
+      headerRow.appendChild(totalHeader);
+
+      quoteTable.appendChild(headerRow);
+      return quoteTable;
+    }
 
     // Add item details
     const items = document.querySelectorAll(".cart-item");
+    const quoteRows = [];
     const cartItemsForCompatibility = [];
     items.forEach((item) => {
       const itemRow = document.createElement("tr");
@@ -540,7 +549,9 @@ document.addEventListener("click", async function (event) {
       titleCell.style.border = "1px solid #000";
       titleCell.style.padding = "8px";
       titleCell.style.textAlign = "left";
-      titleCell.colSpan = 1; // Spans two columns for title and SKU
+      titleCell.style.overflowWrap = "anywhere";
+      titleCell.style.wordBreak = "break-word";
+      titleCell.colSpan = 1;
 
       // Title content
       if (titleLink) {
@@ -593,6 +604,8 @@ document.addEventListener("click", async function (event) {
       skuCell.style.padding = "8px";
       skuCell.style.textAlign = "left";
       skuCell.style.verticalAlign = "middle";
+      skuCell.style.overflowWrap = "anywhere";
+      skuCell.style.wordBreak = "break-word";
       itemRow.appendChild(skuCell);
       if (skuValue || itemTitleText) {
         cartItemsForCompatibility.push({
@@ -645,14 +658,26 @@ document.addEventListener("click", async function (event) {
       totalCell.style.verticalAlign = "middle";
       itemRow.appendChild(totalCell);
 
-      table.appendChild(itemRow);
+      quoteRows.push(itemRow);
     });
 
     // Append the table to a container
     const container = document.createElement("div");
     container.id = "pdf-container";
     container.appendChild(headerContainer);
-    container.appendChild(table);
+
+    const quoteRowChunks = chunkArray(quoteRows, QUOTE_ROWS_PER_TABLE);
+    if (!quoteRowChunks.length) {
+      quoteRowChunks.push([]);
+    }
+
+    quoteRowChunks.forEach((quoteRowChunk) => {
+      const quoteTable = createQuoteTable();
+      quoteRowChunk.forEach((row) => {
+        quoteTable.appendChild(row);
+      });
+      container.appendChild(quoteTable);
+    });
 
     // Add grand total separately
     const grandTotal = document.querySelector(
