@@ -78,14 +78,6 @@ function resolveCompatibilityKey(cartItem, itemsBySku, itemIndexes) {
     return cartSku;
   }
 
-  const normalizedSku = normalizeCompatibilityLookup(cartSku);
-  const normalizedSkuCandidates = normalizedSku
-    ? itemIndexes.normalizedSkuToKeys[normalizedSku]
-    : null;
-  if (normalizedSkuCandidates && normalizedSkuCandidates.length === 1) {
-    return normalizedSkuCandidates[0];
-  }
-
   const normalizedTitle = normalizeCompatibilityName(cartTitle);
   if (!normalizedTitle) {
     return "";
