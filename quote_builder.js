@@ -143,6 +143,19 @@ function createCompatibilityCell(cell, statusText, backgroundColor) {
   cell.style.verticalAlign = "middle";
 }
 
+function chunkArray(items, maxChunkSize) {
+  if (!Array.isArray(items) || maxChunkSize <= 0) {
+    return [];
+  }
+
+  const chunks = [];
+  for (let index = 0; index < items.length; index += maxChunkSize) {
+    chunks.push(items.slice(index, index + maxChunkSize));
+  }
+
+  return chunks;
+}
+
 async function appendCartCompatibilityMatrix(container, cartItems) {
   const normalizedCartItems = Array.isArray(cartItems)
     ? cartItems
@@ -298,97 +311,108 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
     return;
   }
 
-  const matrixTable = document.createElement("table");
-  matrixTable.style.width = "100%";
-  matrixTable.style.borderCollapse = "collapse";
-  matrixTable.style.marginBottom = "12px";
-
-  const headerRow = document.createElement("tr");
-  const laptopHeader = document.createElement("th");
-  laptopHeader.textContent = "Laptop";
-  laptopHeader.style.border = "1px solid #000";
-  laptopHeader.style.padding = "8px";
-  laptopHeader.style.backgroundColor = "#f2f2f2";
-  laptopHeader.style.textAlign = "left";
-  headerRow.appendChild(laptopHeader);
-
-  cartDocks.forEach((dockSku) => {
-    const dockHeader = document.createElement("th");
-    const dockData = docks[dockSku] || {};
-    dockHeader.textContent = dockData.name || dockSku;
-    dockHeader.style.border = "1px solid #000";
-    dockHeader.style.padding = "8px";
-    dockHeader.style.backgroundColor = "#f2f2f2";
-    dockHeader.style.textAlign = "center";
-    headerRow.appendChild(dockHeader);
-  });
-
-  matrixTable.appendChild(headerRow);
-
+  const MAX_DOCK_COLUMNS_PER_TABLE = 6;
+  const MAX_COMPUTER_ROWS_PER_TABLE = 18;
+  const dockChunks = chunkArray(cartDocks, MAX_DOCK_COLUMNS_PER_TABLE);
+  const computerChunks = chunkArray(cartComputers, MAX_COMPUTER_ROWS_PER_TABLE);
   const notes = [];
-  cartComputers.forEach((computerSku) => {
-    const computerData = computers[computerSku] || {};
-    const row = document.createElement("tr");
 
-    const computerCell = document.createElement("td");
-    computerCell.textContent = computerData.name || computerSku;
-    computerCell.style.border = "1px solid #000";
-    computerCell.style.padding = "8px";
-    computerCell.style.textAlign = "left";
-    computerCell.style.fontWeight = "600";
-    row.appendChild(computerCell);
+  dockChunks.forEach((dockChunk) => {
+    computerChunks.forEach((computerChunk) => {
+      const matrixTable = document.createElement("table");
+      matrixTable.style.width = "100%";
+      matrixTable.style.borderCollapse = "collapse";
+      matrixTable.style.marginBottom = "10px";
+      matrixTable.style.pageBreakInside = "avoid";
+      matrixTable.style.breakInside = "avoid";
 
-    cartDocks.forEach((dockSku) => {
-      const compatibilityCell = document.createElement("td");
-      compatibilityCell.style.border = "1px solid #000";
-      compatibilityCell.style.padding = "8px";
+      const headerRow = document.createElement("tr");
+      const laptopHeader = document.createElement("th");
+      laptopHeader.textContent = "Laptop";
+      laptopHeader.style.border = "1px solid #000";
+      laptopHeader.style.padding = "8px";
+      laptopHeader.style.backgroundColor = "#f2f2f2";
+      laptopHeader.style.textAlign = "left";
+      headerRow.appendChild(laptopHeader);
 
-      const incompatibleWith = Array.isArray(computerData.incompatibleWith)
-        ? computerData.incompatibleWith
-        : [];
-      const partiallyCompatibleWith = Array.isArray(
-        computerData.partiallyCompatibleWith,
-      )
-        ? computerData.partiallyCompatibleWith
-        : [];
+      dockChunk.forEach((dockSku) => {
+        const dockHeader = document.createElement("th");
+        const dockData = docks[dockSku] || {};
+        dockHeader.textContent = dockData.name || dockSku;
+        dockHeader.style.border = "1px solid #000";
+        dockHeader.style.padding = "8px";
+        dockHeader.style.backgroundColor = "#f2f2f2";
+        dockHeader.style.textAlign = "center";
+        headerRow.appendChild(dockHeader);
+      });
 
-      if (incompatibleWith.includes(dockSku)) {
-        createCompatibilityCell(compatibilityCell, "Incompatible", "#FFDDDD");
-      } else if (partiallyCompatibleWith.includes(dockSku)) {
-        createCompatibilityCell(compatibilityCell, "Partial", "#FFF6CC");
-      } else {
-        createCompatibilityCell(compatibilityCell, "Compatible", "#DDF5DD");
-      }
+      matrixTable.appendChild(headerRow);
 
-      const rawNoteText =
-        computerData.compatibilityData &&
-        computerData.compatibilityData[dockSku] &&
-        computerData.compatibilityData[dockSku].notes;
-      const noteText =
-        typeof rawNoteText === "string" ? rawNoteText.trim() : "";
+      computerChunk.forEach((computerSku) => {
+        const computerData = computers[computerSku] || {};
+        const row = document.createElement("tr");
 
-      if (noteText) {
-        const noteIndex = notes.length + 1;
-        notes.push({
-          index: noteIndex,
-          computerName: computerData.name || computerSku,
-          dockName: (docks[dockSku] && docks[dockSku].name) || dockSku,
-          text: noteText,
+        const computerCell = document.createElement("td");
+        computerCell.textContent = computerData.name || computerSku;
+        computerCell.style.border = "1px solid #000";
+        computerCell.style.padding = "8px";
+        computerCell.style.textAlign = "left";
+        computerCell.style.fontWeight = "600";
+        row.appendChild(computerCell);
+
+        dockChunk.forEach((dockSku) => {
+          const compatibilityCell = document.createElement("td");
+          compatibilityCell.style.border = "1px solid #000";
+          compatibilityCell.style.padding = "8px";
+
+          const incompatibleWith = Array.isArray(computerData.incompatibleWith)
+            ? computerData.incompatibleWith
+            : [];
+          const partiallyCompatibleWith = Array.isArray(
+            computerData.partiallyCompatibleWith,
+          )
+            ? computerData.partiallyCompatibleWith
+            : [];
+
+          if (incompatibleWith.includes(dockSku)) {
+            createCompatibilityCell(compatibilityCell, "Incompatible", "#FFDDDD");
+          } else if (partiallyCompatibleWith.includes(dockSku)) {
+            createCompatibilityCell(compatibilityCell, "Partial", "#FFF6CC");
+          } else {
+            createCompatibilityCell(compatibilityCell, "Compatible", "#DDF5DD");
+          }
+
+          const rawNoteText =
+            computerData.compatibilityData &&
+            computerData.compatibilityData[dockSku] &&
+            computerData.compatibilityData[dockSku].notes;
+          const noteText =
+            typeof rawNoteText === "string" ? rawNoteText.trim() : "";
+
+          if (noteText) {
+            const noteIndex = notes.length + 1;
+            notes.push({
+              index: noteIndex,
+              computerName: computerData.name || computerSku,
+              dockName: (docks[dockSku] && docks[dockSku].name) || dockSku,
+              text: noteText,
+            });
+
+            const superscript = document.createElement("sup");
+            superscript.textContent = ` ${noteIndex}`;
+            superscript.style.fontWeight = "700";
+            compatibilityCell.appendChild(superscript);
+          }
+
+          row.appendChild(compatibilityCell);
         });
 
-        const superscript = document.createElement("sup");
-        superscript.textContent = ` ${noteIndex}`;
-        superscript.style.fontWeight = "700";
-        compatibilityCell.appendChild(superscript);
-      }
+        matrixTable.appendChild(row);
+      });
 
-      row.appendChild(compatibilityCell);
+      container.appendChild(matrixTable);
     });
-
-    matrixTable.appendChild(row);
   });
-
-  container.appendChild(matrixTable);
 
   const legend = document.createElement("div");
   legend.style.fontSize = "11px";
@@ -628,8 +652,6 @@ document.addEventListener("click", async function (event) {
     container.appendChild(headerContainer);
     container.appendChild(table);
 
-    await appendCartCompatibilityMatrix(container, cartItemsForCompatibility);
-
     // Add grand total separately
     const grandTotal = document.querySelector(
       ".cart-total-value.cart-total-grandTotal",
@@ -672,6 +694,17 @@ document.addEventListener("click", async function (event) {
     footerContainer.appendChild(disclaimer);
     container.appendChild(footerContainer);
 
+    const compatibilitySection = document.createElement("div");
+    compatibilitySection.style.pageBreakBefore = "always";
+    compatibilitySection.style.breakBefore = "page";
+    await appendCartCompatibilityMatrix(
+      compatibilitySection,
+      cartItemsForCompatibility,
+    );
+    if (compatibilitySection.children.length) {
+      container.appendChild(compatibilitySection);
+    }
+
     // Options for generating the PDF
     const opt = {
       margin: [20, 10, 20, 10], // top, right, bottom, left
@@ -679,7 +712,7 @@ document.addEventListener("click", async function (event) {
       image: { type: "jpeg", quality: 0.98 },
       html2canvas: { scale: 2 },
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-      pagebreak: { mode: "avoid-all" },
+      pagebreak: { mode: ["css", "legacy"] },
     };
 
     // Generate the PDF
