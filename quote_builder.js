@@ -2,7 +2,6 @@
 const COMPATIBILITY_DATA_URL =
   "https://store-jsj7fos9p1.mybigcommerce.com/content/JSON%20Files/Compatibility.json";
 
-// Function to set a cookie
 function setCookie(name, value, days) {
   let expires = "";
   if (days) {
@@ -91,58 +90,6 @@ function resolveCompatibilityKey(cartItem, itemsBySku, itemIndexes) {
   return nameMatches[0];
 }
 
-function appendUnmappedCompatibilityItems(container, unmappedItems) {
-  if (!unmappedItems.length) {
-    return;
-  }
-
-  const unmappedHeader = document.createElement("div");
-  unmappedHeader.textContent = "Not included in matrix";
-  unmappedHeader.style.fontSize = "11px";
-  unmappedHeader.style.fontWeight = "700";
-  unmappedHeader.style.marginTop = "8px";
-  unmappedHeader.style.marginBottom = "4px";
-  unmappedHeader.style.color = "#555";
-  container.appendChild(unmappedHeader);
-
-  const unmappedList = document.createElement("ul");
-  unmappedList.style.margin = "0 0 0 16px";
-  unmappedList.style.padding = "0";
-  unmappedList.style.fontSize = "11px";
-  unmappedList.style.color = "#555";
-
-  unmappedItems.forEach((item) => {
-    const unmappedItem = document.createElement("li");
-    const itemTitle = item.title ? item.title.trim() : "";
-    const itemSku = item.sku ? item.sku.trim() : "";
-
-    if (itemTitle && itemSku) {
-      unmappedItem.textContent = `${itemTitle} (SKU: ${itemSku})`;
-    } else if (itemTitle) {
-      unmappedItem.textContent = itemTitle;
-    } else if (itemSku) {
-      unmappedItem.textContent = `SKU: ${itemSku}`;
-    }
-
-    if (unmappedItem.textContent) {
-      unmappedList.appendChild(unmappedItem);
-    }
-  });
-
-  if (unmappedList.children.length) {
-    container.appendChild(unmappedList);
-  }
-}
-
-function createCompatibilityCell(cell, statusText, backgroundColor) {
-  cell.textContent = statusText;
-  cell.style.backgroundColor = backgroundColor;
-  cell.style.color = "#1f1f1f";
-  cell.style.fontWeight = "600";
-  cell.style.textAlign = "center";
-  cell.style.verticalAlign = "middle";
-}
-
 function chunkArray(items, maxChunkSize) {
   if (!Array.isArray(items) || maxChunkSize <= 0) {
     return [];
@@ -156,7 +103,186 @@ function chunkArray(items, maxChunkSize) {
   return chunks;
 }
 
-async function appendCartCompatibilityMatrix(container, cartItems) {
+function mmToPx(mm) {
+  return (mm * 96) / 25.4;
+}
+
+const PDF_MARGIN_MM = [20, 10, 20, 10]; // top, right, bottom, left
+const PDF_MARGINS_MM = {
+  top: PDF_MARGIN_MM[0],
+  right: PDF_MARGIN_MM[1],
+  bottom: PDF_MARGIN_MM[2],
+  left: PDF_MARGIN_MM[3],
+};
+const A4_PAGE_MM = {
+  height: 297,
+  width: 210,
+};
+const PDF_ROW_FRAGMENT_MAX_CHARS = 120;
+const PDF_QUOTE_DETAIL_LINES_PER_FRAGMENT = 6;
+const PDF_COMPATIBILITY_NAME_MAX_CHARS = 64;
+const QUOTE_PDF_TEST_NAMESPACE = "__quotePdfTest";
+const QUOTE_PDF_FIXTURE_VERSION = "1";
+const QUOTE_PDF_TEST_QUERY_PARAM = "quotePdfTest";
+
+let latestQuotePdfSnapshot = null;
+
+function waitForFontsReady() {
+  if (!document.fonts || typeof document.fonts.ready?.then !== "function") {
+    return Promise.resolve();
+  }
+
+  return document.fonts.ready.catch(() => undefined);
+}
+
+function getPdfContentMetrics() {
+  return {
+    contentHeightPx: mmToPx(
+      A4_PAGE_MM.height - PDF_MARGINS_MM.top - PDF_MARGINS_MM.bottom,
+    ),
+    contentWidthPx: mmToPx(
+      A4_PAGE_MM.width - PDF_MARGINS_MM.left - PDF_MARGINS_MM.right,
+    ),
+  };
+}
+
+function splitTextIntoFragments(
+  text,
+  maxCharsPerFragment = PDF_ROW_FRAGMENT_MAX_CHARS,
+) {
+  const normalizedText = typeof text === "string" ? text.trim() : "";
+  if (!normalizedText) {
+    return [];
+  }
+
+  const maxChars = Math.max(20, maxCharsPerFragment);
+  const words = normalizedText.split(/\s+/).filter(Boolean);
+  if (!words.length) {
+    return [];
+  }
+
+  const fragments = [];
+  let currentFragment = "";
+
+  function flushCurrent() {
+    if (!currentFragment) {
+      return;
+    }
+
+    fragments.push(currentFragment);
+    currentFragment = "";
+  }
+
+  words.forEach((word) => {
+    if (word.length > maxChars) {
+      flushCurrent();
+      for (let index = 0; index < word.length; index += maxChars) {
+        fragments.push(word.slice(index, index + maxChars));
+      }
+      return;
+    }
+
+    const candidate = currentFragment ? `${currentFragment} ${word}` : word;
+    if (candidate.length <= maxChars) {
+      currentFragment = candidate;
+      return;
+    }
+
+    flushCurrent();
+    currentFragment = word;
+  });
+
+  flushCurrent();
+  return fragments;
+}
+
+// =========================================
+// Data Layer
+// =========================================
+
+function extractCartData() {
+  const cartItemNodes = Array.from(document.querySelectorAll(".cart-item"));
+  const items = cartItemNodes.map((cartItem) => {
+    const titleLink = cartItem.querySelector(".cart-item-title a");
+    const itemTitleText = titleLink
+      ? titleLink.innerText.trim()
+      : cartItem.querySelector(".cart-item-title")?.innerText.trim() || "";
+
+    const optionLines = Array.from(
+      cartItem.querySelectorAll(".cart-item-options"),
+    )
+      .map((option) => option.innerText.trim())
+      .filter(Boolean);
+
+    const specLines = [];
+    const specDl = cartItem.querySelector(".definitionList");
+    if (specDl) {
+      specDl.querySelectorAll("dt.definitionList-key").forEach((dt) => {
+        const dd = dt.nextElementSibling;
+        if (!dd) {
+          return;
+        }
+
+        const specText =
+          `${dt.textContent.trim()} ${dd.textContent.trim()}`.trim();
+        if (specText) {
+          specLines.push(specText);
+        }
+      });
+    }
+
+    const skuElement = cartItem.querySelector(".cart-item-sku");
+    const skuValue = normalizeSkuText(
+      skuElement ? skuElement.innerText.trim() : "",
+    );
+
+    const priceElement = cartItem.querySelector(
+      ".cart-item-block.cart-item-info .cart-item-value",
+    );
+    const priceText = priceElement ? priceElement.innerText.trim() : "";
+
+    const quantityElement = cartItem.querySelector(
+      ".cart-item-block.cart-item-info.cart-item-quantity .form-increment .form-input",
+    );
+    const quantityText = quantityElement ? quantityElement.value.trim() : "";
+
+    const priceValue = parseFloat(priceText.replace(/[^0-9.-]+/g, "")) || 0;
+    const quantityValue = parseInt(quantityText, 10) || 0;
+    const lineTotalValue = priceValue * quantityValue;
+    const lineTotalText = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: "USD",
+    }).format(lineTotalValue);
+
+    return {
+      title: itemTitleText,
+      titleHref: titleLink ? titleLink.href : "",
+      optionLines,
+      specLines,
+      optionLineCount: optionLines.length,
+      sku: skuValue,
+      priceText,
+      quantityText,
+      lineTotalText,
+    };
+  });
+
+  const grandTotal = document.querySelector(
+    ".cart-total-value.cart-total-grandTotal",
+  );
+  const grandTotalText = grandTotal ? grandTotal.innerText.trim() : "";
+
+  return {
+    items,
+    grandTotalText,
+  };
+}
+
+// =========================================
+// Compatibility Data Layer
+// =========================================
+
+function normalizeCartItemsForCompatibility(cartItems) {
   const normalizedCartItems = Array.isArray(cartItems)
     ? cartItems
         .map((item) => {
@@ -180,11 +306,7 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
   const seenItemKeys = new Set();
   normalizedCartItems.forEach((item) => {
     const dedupeKey = `${item.sku}::${item.title}`;
-    if (seenItemKeys.has(dedupeKey)) {
-      return;
-    }
-
-    if (!item.sku && !item.title) {
+    if (seenItemKeys.has(dedupeKey) || (!item.sku && !item.title)) {
       return;
     }
 
@@ -192,7 +314,60 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
     uniqueCartItems.push(item);
   });
 
-  if (!uniqueCartItems.length) return;
+  return uniqueCartItems;
+}
+
+function getCompatibilityStatus(computerData, dockSku) {
+  const incompatibleWith = Array.isArray(computerData.incompatibleWith)
+    ? computerData.incompatibleWith
+    : [];
+  const partiallyCompatibleWith = Array.isArray(
+    computerData.partiallyCompatibleWith,
+  )
+    ? computerData.partiallyCompatibleWith
+    : [];
+
+  if (incompatibleWith.includes(dockSku)) {
+    return { text: "Incompatible", backgroundColor: "#FFDDDD" };
+  }
+
+  if (partiallyCompatibleWith.includes(dockSku)) {
+    return { text: "Partial", backgroundColor: "#FFF6CC" };
+  }
+
+  return { text: "Compatible", backgroundColor: "#DDF5DD" };
+}
+
+function getUnmappedCompatibilityItemText(item) {
+  const itemTitle = item.title ? item.title.trim() : "";
+  const itemSku = item.sku ? item.sku.trim() : "";
+
+  if (itemTitle && itemSku) {
+    return `${itemTitle} (SKU: ${itemSku})`;
+  }
+
+  if (itemTitle) {
+    return itemTitle;
+  }
+
+  if (itemSku) {
+    return `SKU: ${itemSku}`;
+  }
+
+  return "";
+}
+
+async function buildCompatibilityData(cartData) {
+  const cartItems = normalizeCartItemsForCompatibility(
+    (cartData && cartData.items) || [],
+  ).map((item) => ({
+    sku: item.sku,
+    title: item.title,
+  }));
+
+  if (!cartItems.length) {
+    return null;
+  }
 
   let compatibilityData;
   try {
@@ -205,7 +380,7 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
     compatibilityData = await response.json();
   } catch (error) {
     console.error("Unable to load compatibility data for quote PDF:", error);
-    return;
+    return null;
   }
 
   const compatibilityRoot =
@@ -251,7 +426,7 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
   const seenDockKeys = new Set();
   const unmappedItems = [];
 
-  uniqueCartItems.forEach((item) => {
+  cartItems.forEach((item) => {
     const matchedComputerKey = resolveCompatibilityKey(
       item,
       visibleComputers,
@@ -279,111 +454,23 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
   });
 
   if (!cartComputers.length && !cartDocks.length && !unmappedItems.length) {
-    return;
+    return null;
   }
 
-  const matrixHeading = document.createElement("div");
-  matrixHeading.textContent = "Cart Compatibility Matrix";
-  matrixHeading.style.marginTop = "24px";
-  matrixHeading.style.marginBottom = "10px";
-  matrixHeading.style.fontSize = "18px";
-  matrixHeading.style.fontWeight = "700";
-  matrixHeading.style.color = "#222";
-  container.appendChild(matrixHeading);
-
-  const matrixIntro = document.createElement("div");
-  matrixIntro.textContent =
-    "This section checks only laptops and docks/hubs/monitors currently in this cart.";
-  matrixIntro.style.fontSize = "12px";
-  matrixIntro.style.marginBottom = "10px";
-  matrixIntro.style.color = "#333";
-  container.appendChild(matrixIntro);
-
-  if (!cartComputers.length || !cartDocks.length) {
-    const matrixUnavailable = document.createElement("div");
-    matrixUnavailable.textContent =
-      "Matrix unavailable: matching laptop and dock/hub/monitor entries were not both found.";
-    matrixUnavailable.style.fontSize = "11px";
-    matrixUnavailable.style.color = "#555";
-    matrixUnavailable.style.marginBottom = "8px";
-    container.appendChild(matrixUnavailable);
-    appendUnmappedCompatibilityItems(container, unmappedItems);
-    return;
-  }
-
-  const MAX_DOCK_COLUMNS_PER_TABLE = 6;
-  const MAX_COMPUTER_ROWS_PER_TABLE = 10;
-  const dockChunks = chunkArray(cartDocks, MAX_DOCK_COLUMNS_PER_TABLE);
-  const computerChunks = chunkArray(cartComputers, MAX_COMPUTER_ROWS_PER_TABLE);
+  const matrixAvailable = cartComputers.length > 0 && cartDocks.length > 0;
   const notes = [];
+  const matrixTables = [];
 
-  dockChunks.forEach((dockChunk) => {
-    computerChunks.forEach((computerChunk) => {
-      const matrixTable = document.createElement("table");
-      matrixTable.style.width = "100%";
-      matrixTable.style.borderCollapse = "collapse";
-      matrixTable.style.marginBottom = "10px";
+  if (matrixAvailable) {
+    const MAX_DOCK_COLUMNS_PER_TABLE = 6;
+    const dockChunks = chunkArray(cartDocks, MAX_DOCK_COLUMNS_PER_TABLE);
 
-      const headerRow = document.createElement("tr");
-      const laptopHeader = document.createElement("th");
-      laptopHeader.textContent = "Laptop";
-      laptopHeader.style.border = "1px solid #000";
-      laptopHeader.style.padding = "6px";
-      laptopHeader.style.fontSize = "10.5px";
-      laptopHeader.style.backgroundColor = "#f2f2f2";
-      laptopHeader.style.textAlign = "left";
-      headerRow.appendChild(laptopHeader);
+    dockChunks.forEach((dockChunk) => {
+      const rows = cartComputers.map((computerSku) => {
+        const computerData = visibleComputers[computerSku] || {};
 
-      dockChunk.forEach((dockSku) => {
-        const dockHeader = document.createElement("th");
-        const dockData = docks[dockSku] || {};
-        dockHeader.textContent = dockData.name || dockSku;
-        dockHeader.style.border = "1px solid #000";
-        dockHeader.style.padding = "6px";
-        dockHeader.style.fontSize = "10.5px";
-        dockHeader.style.backgroundColor = "#f2f2f2";
-        dockHeader.style.textAlign = "center";
-        headerRow.appendChild(dockHeader);
-      });
-
-      matrixTable.appendChild(headerRow);
-
-      computerChunk.forEach((computerSku) => {
-        const computerData = computers[computerSku] || {};
-        const row = document.createElement("tr");
-
-        const computerCell = document.createElement("td");
-        computerCell.textContent = computerData.name || computerSku;
-        computerCell.style.border = "1px solid #000";
-        computerCell.style.padding = "6px";
-        computerCell.style.fontSize = "10.5px";
-        computerCell.style.textAlign = "left";
-        computerCell.style.fontWeight = "600";
-        row.appendChild(computerCell);
-
-        dockChunk.forEach((dockSku) => {
-          const compatibilityCell = document.createElement("td");
-          compatibilityCell.style.border = "1px solid #000";
-          compatibilityCell.style.padding = "6px";
-          compatibilityCell.style.fontSize = "10.5px";
-
-          const incompatibleWith = Array.isArray(computerData.incompatibleWith)
-            ? computerData.incompatibleWith
-            : [];
-          const partiallyCompatibleWith = Array.isArray(
-            computerData.partiallyCompatibleWith,
-          )
-            ? computerData.partiallyCompatibleWith
-            : [];
-
-          if (incompatibleWith.includes(dockSku)) {
-            createCompatibilityCell(compatibilityCell, "Incompatible", "#FFDDDD");
-          } else if (partiallyCompatibleWith.includes(dockSku)) {
-            createCompatibilityCell(compatibilityCell, "Partial", "#FFF6CC");
-          } else {
-            createCompatibilityCell(compatibilityCell, "Compatible", "#DDF5DD");
-          }
-
+        const cells = dockChunk.map((dockSku) => {
+          const status = getCompatibilityStatus(computerData, dockSku);
           const rawNoteText =
             computerData.compatibilityData &&
             computerData.compatibilityData[dockSku] &&
@@ -391,387 +478,1560 @@ async function appendCartCompatibilityMatrix(container, cartItems) {
           const noteText =
             typeof rawNoteText === "string" ? rawNoteText.trim() : "";
 
+          let noteIndex = null;
           if (noteText) {
-            const noteIndex = notes.length + 1;
+            noteIndex = notes.length + 1;
             notes.push({
               index: noteIndex,
               computerName: computerData.name || computerSku,
-              dockName: (docks[dockSku] && docks[dockSku].name) || dockSku,
+              dockName:
+                (visibleDocks[dockSku] && visibleDocks[dockSku].name) ||
+                dockSku,
               text: noteText,
             });
-
-            const superscript = document.createElement("sup");
-            superscript.textContent = ` ${noteIndex}`;
-            superscript.style.fontWeight = "700";
-            compatibilityCell.appendChild(superscript);
           }
 
-          row.appendChild(compatibilityCell);
+          return {
+            dockSku,
+            statusText: status.text,
+            backgroundColor: status.backgroundColor,
+            noteIndex,
+          };
         });
 
-        matrixTable.appendChild(row);
+        return {
+          computerSku,
+          computerName: computerData.name || computerSku,
+          cells,
+        };
       });
 
-      container.appendChild(matrixTable);
+      matrixTables.push({
+        dockChunk,
+        rows,
+      });
     });
-  });
-
-  const legend = document.createElement("div");
-  legend.style.fontSize = "11px";
-  legend.style.color = "#333";
-  legend.style.marginBottom = "6px";
-  legend.textContent =
-    "Legend: Compatible (green), Partial (yellow), Incompatible (red).";
-  container.appendChild(legend);
-
-  if (notes.length) {
-    const notesHeader = document.createElement("div");
-    notesHeader.textContent = "Compatibility Notes";
-    notesHeader.style.fontSize = "13px";
-    notesHeader.style.fontWeight = "700";
-    notesHeader.style.marginTop = "8px";
-    notesHeader.style.marginBottom = "5px";
-    container.appendChild(notesHeader);
-
-    const notesList = document.createElement("ol");
-    notesList.style.margin = "0 0 0 18px";
-    notesList.style.padding = "0";
-    notesList.style.fontSize = "11px";
-    notesList.style.color = "#333";
-
-    notes.forEach((note) => {
-      const noteItem = document.createElement("li");
-      noteItem.textContent = `${note.computerName} + ${note.dockName}: ${note.text}`;
-      noteItem.style.marginBottom = "4px";
-      notesList.appendChild(noteItem);
-    });
-
-    container.appendChild(notesList);
   }
 
-  appendUnmappedCompatibilityItems(container, unmappedItems);
+  return {
+    matrixAvailable,
+    matrixTables,
+    visibleDocks,
+    notes,
+    unmappedItems,
+  };
 }
+
+// =========================================
+// Document Model Layer
+// =========================================
+
+function splitQuoteRowIfNeeded(rowData) {
+  const detailWithKinds = rowData.detailLines.flatMap((line, index) =>
+    splitTextIntoFragments(line).map((text) => ({
+      text,
+      isOptionLine: index < rowData.optionLineCount,
+    })),
+  );
+
+  if (!detailWithKinds.length) {
+    return [
+      {
+        ...rowData,
+        detailLines: [],
+        optionLineCount: 0,
+      },
+    ];
+  }
+
+  const rowFragments = [];
+  for (
+    let index = 0;
+    index < detailWithKinds.length;
+    index += PDF_QUOTE_DETAIL_LINES_PER_FRAGMENT
+  ) {
+    const fragmentDetailLines = detailWithKinds.slice(
+      index,
+      index + PDF_QUOTE_DETAIL_LINES_PER_FRAGMENT,
+    );
+    const optionLineCount = fragmentDetailLines.filter(
+      (line) => line.isOptionLine,
+    ).length;
+
+    rowFragments.push({
+      title: index === 0 ? rowData.title : `${rowData.title} (continued)`,
+      titleHref: index === 0 ? rowData.titleHref : "",
+      detailLines: fragmentDetailLines.map((line) => line.text),
+      optionLineCount,
+      sku: index === 0 ? rowData.sku : "",
+      priceText: index === 0 ? rowData.priceText : "",
+      quantityText: index === 0 ? rowData.quantityText : "",
+      lineTotalText: index === 0 ? rowData.lineTotalText : "",
+      compatibilityPayload: rowData.compatibilityPayload,
+    });
+  }
+
+  return rowFragments;
+}
+
+function splitCompatibilityRowIfNeeded(rowData) {
+  const nameFragments = splitTextIntoFragments(
+    rowData.computerName,
+    PDF_COMPATIBILITY_NAME_MAX_CHARS,
+  );
+
+  if (nameFragments.length <= 1) {
+    return [rowData];
+  }
+
+  return nameFragments.map((computerName, index) => ({
+    computerSku: rowData.computerSku,
+    computerName: index === 0 ? computerName : `${computerName} (continued)`,
+    cells:
+      index === 0
+        ? rowData.cells
+        : rowData.cells.map(() => ({
+            statusText: "",
+            backgroundColor: "#ffffff",
+            noteIndex: null,
+          })),
+  }));
+}
+
+function buildQuoteDocumentModel({ cartData, compatibilityData, date }) {
+  const today = date instanceof Date ? date : new Date();
+  const dateOptions = { year: "numeric", month: "long", day: "numeric" };
+
+  const rawRows = Array.isArray(cartData?.items) ? cartData.items : [];
+  const quoteRows = rawRows.flatMap((rowData) =>
+    splitQuoteRowIfNeeded({
+      title: rowData.title,
+      titleHref: rowData.titleHref,
+      detailLines: [...rowData.optionLines, ...rowData.specLines],
+      optionLineCount: rowData.optionLineCount,
+      sku: rowData.sku,
+      priceText: rowData.priceText,
+      quantityText: rowData.quantityText,
+      lineTotalText: rowData.lineTotalText,
+      compatibilityPayload: {
+        sku: rowData.sku,
+        title: rowData.title,
+      },
+    }),
+  );
+
+  const cartItemsForCompatibility = rawRows
+    .map((rowData) => ({ sku: rowData.sku, title: rowData.title }))
+    .filter((item) => item.sku || item.title);
+
+  const compatibilityModel = compatibilityData
+    ? {
+        ...compatibilityData,
+        matrixTables: compatibilityData.matrixTables.map((tableChunk) => ({
+          dockChunk: tableChunk.dockChunk,
+          rows: tableChunk.rows.flatMap((row) =>
+            splitCompatibilityRowIfNeeded(row),
+          ),
+        })),
+      }
+    : null;
+
+  return {
+    header: {
+      title: "TechHub Quote",
+      dateText: today.toLocaleDateString(undefined, dateOptions),
+    },
+    quoteRows,
+    grandTotalText: cartData?.grandTotalText || "",
+    footer: {
+      disclaimerHtml: `
+        <p><strong>Pricing and stock are subject to change.</strong>
+        Quote pricing will be honored for 14 days while inventory lasts.</p>
+        <p>An approved purchaser can log in to
+        <a href="https://techhub.tamu.edu/" class="pdf-link">TechHub</a>
+        to complete the purchase. See
+        <a href="https://tamu.mybigcommerce.com/terms-and-conditions/" class="pdf-link">Terms and Conditions.</a></p>
+      `,
+    },
+    compatibility: compatibilityModel,
+    cartItemsForCompatibility,
+  };
+}
+
+// =========================================
+// Rendering Layer
+// =========================================
+
+function injectQuoteStyles() {
+  const existing = document.getElementById("quote-pdf-styles");
+  if (existing) {
+    return;
+  }
+
+  const styleTag = document.createElement("style");
+  styleTag.id = "quote-pdf-styles";
+  styleTag.textContent = `
+    .pdf-root { font-family: "Open Sans", sans-serif; width: 190mm; background: #fff; color: #000; }
+    .quote-table table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 10px; }
+    .quote-table th, .quote-table td { border: 1px solid #000; padding: 8px; font-size: 12px; }
+    .quote-table thead { display: table-row-group; }
+    .quote-table col.quote-col-item { width: 46%; }
+    .quote-table col.quote-col-sku { width: 14%; }
+    .quote-table col.quote-col-price { width: 14%; }
+    .quote-table col.quote-col-quantity { width: 10%; }
+    .quote-table col.quote-col-total { width: 16%; }
+    .avoid-break { page-break-inside: avoid; break-inside: avoid; }
+    .pdf-page { width: 190mm; min-height: 257mm; padding-bottom: 0; box-sizing: border-box; background: #fff; }
+    .pdf-header { margin-bottom: 20px; }
+    .pdf-title { font-size: 24px; color: #500000; }
+    .pdf-date { font-size: 14px; color: #000; }
+    .quote-table th { background: #f2f2f2; text-align: left; overflow-wrap: anywhere; word-break: break-word; }
+    .quote-table th.quote-price,
+    .quote-table th.quote-quantity,
+    .quote-table th.quote-total { text-align: right; }
+    .quote-table td { vertical-align: middle; overflow-wrap: anywhere; word-break: break-word; }
+    .quote-table .quote-title-cell { text-align: left; }
+    .quote-table .quote-sku-cell { text-align: left; }
+    .quote-table .quote-price-cell,
+    .quote-table .quote-quantity-cell,
+    .quote-table .quote-total-cell { text-align: right; }
+    .quote-detail-line { font-size: 12px; color: #333; padding-left: 10px; }
+    .quote-detail-line.option-line { margin-top: 7px; }
+    .quote-detail-line.spec-line { margin-top: 4px; }
+    .quote-title-link { border-bottom-color: transparent; color: inherit; text-decoration: none; }
+    .grand-total { margin-top: 20px; margin-bottom: 8px; text-align: right; font-weight: bold; }
+    .grand-total-label { margin-right: 10px; }
+    .pdf-footer { margin-top: 14px; font-size: 12px; line-height: 1.4; color: #000; text-align: center; }
+    .pdf-footer p { margin: 0; }
+    .pdf-footer p + p { margin-top: 6px; }
+    .pdf-footer .pdf-link { font-size: 12px; }
+    .compatibility-section { margin-top: 20px; }
+    .compatibility-title { margin-top: 16px; margin-bottom: 10px; font-size: 18px; font-weight: 700; color: #222; }
+    .compatibility-intro { font-size: 12px; margin-bottom: 10px; color: #333; }
+    .compatibility-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin-bottom: 10px; }
+    .compatibility-table thead { display: table-row-group; }
+    .compatibility-table th { border: 1px solid #000; padding: 6px; font-size: 10.5px; background: #f2f2f2; text-align: center; overflow-wrap: anywhere; word-break: break-word; }
+    .compatibility-table th.compatibility-laptop { text-align: left; }
+    .compatibility-table td { border: 1px solid #000; padding: 6px; font-size: 10.5px; overflow-wrap: anywhere; word-break: break-word; }
+    .compatibility-table td.compatibility-computer { text-align: left; font-weight: 600; }
+    .compatibility-cell { text-align: center; vertical-align: middle; color: #1f1f1f; font-weight: 600; }
+    .compatibility-cell sup { font-weight: 700; }
+    .compatibility-legend { font-size: 11px; color: #333; margin-bottom: 6px; }
+    .compatibility-notes-title { font-size: 13px; font-weight: 700; margin-top: 8px; margin-bottom: 5px; }
+    .compatibility-note { display: table; table-layout: fixed; width: 100%; margin-bottom: 3px; }
+    .compatibility-note-number { display: table-cell; width: 20px; padding-right: 4px; vertical-align: top; font-weight: 600; }
+    .compatibility-note-text { display: table-cell; vertical-align: top; }
+    .compatibility-unmapped-title { font-size: 11px; font-weight: 700; margin-top: 14px; margin-bottom: 4px; color: #555; }
+    .compatibility-unmapped-row { font-size: 11px; color: #555; margin-left: 20px; margin-bottom: 2px; overflow-wrap: anywhere; word-break: break-word; }
+    .pdf-exporting { position: fixed; left: 0; top: 0; visibility: visible; z-index: -1; pointer-events: none; display: block !important; background-color: #ffffff !important; color: #000000 !important; opacity: 1; }
+  `;
+  document.head.appendChild(styleTag);
+}
+
+function updatePdfPageSizing(metrics) {
+  if (!metrics || typeof metrics.contentWidthPx !== "number") {
+    return;
+  }
+
+  const existing = document.getElementById("quote-pdf-metrics");
+  const styleTag = existing || document.createElement("style");
+  styleTag.id = "quote-pdf-metrics";
+  styleTag.textContent = `
+    .pdf-page { width: ${metrics.contentWidthPx}px; max-width: ${metrics.contentWidthPx}px; }
+  `;
+
+  if (!existing) {
+    document.head.appendChild(styleTag);
+  }
+}
+
+function renderQuoteDocument(model) {
+  const root = document.createElement("div");
+  root.className = "pdf-root";
+
+  const headerContainer = document.createElement("div");
+  headerContainer.className = "pdf-header";
+
+  const title = document.createElement("div");
+  title.className = "pdf-title";
+  title.textContent = model.header.title;
+  headerContainer.appendChild(title);
+
+  const date = document.createElement("div");
+  date.className = "pdf-date";
+  date.textContent = model.header.dateText;
+  headerContainer.appendChild(date);
+
+  root.appendChild(headerContainer);
+
+  const quoteTableWrapper = document.createElement("div");
+  quoteTableWrapper.className = "quote-table";
+  const quoteTable = document.createElement("table");
+  quoteTableWrapper.appendChild(quoteTable);
+
+  const columnGroup = document.createElement("colgroup");
+  const columnClasses = [
+    "quote-col-item",
+    "quote-col-sku",
+    "quote-col-price",
+    "quote-col-quantity",
+    "quote-col-total",
+  ];
+  columnClasses.forEach((className) => {
+    const column = document.createElement("col");
+    column.className = className;
+    columnGroup.appendChild(column);
+  });
+  quoteTable.appendChild(columnGroup);
+
+  const tableHead = document.createElement("thead");
+  const tableBody = document.createElement("tbody");
+
+  const headerRow = document.createElement("tr");
+  const itemHeader = document.createElement("th");
+  itemHeader.textContent = "Item";
+  itemHeader.colSpan = 2;
+  headerRow.appendChild(itemHeader);
+
+  const priceHeader = document.createElement("th");
+  priceHeader.textContent = "Price";
+  priceHeader.className = "quote-price";
+  headerRow.appendChild(priceHeader);
+
+  const quantityHeader = document.createElement("th");
+  quantityHeader.textContent = "Quantity";
+  quantityHeader.className = "quote-quantity";
+  headerRow.appendChild(quantityHeader);
+
+  const totalHeader = document.createElement("th");
+  totalHeader.textContent = "Total";
+  totalHeader.className = "quote-total";
+  headerRow.appendChild(totalHeader);
+
+  tableHead.appendChild(headerRow);
+  quoteTable.appendChild(tableHead);
+  quoteTable.appendChild(tableBody);
+
+  model.quoteRows.forEach((rowData) => {
+    const itemRow = document.createElement("tr");
+    itemRow.className = "avoid-break";
+
+    const titleCell = document.createElement("td");
+    titleCell.className = "quote-title-cell";
+    if (rowData.titleHref) {
+      const titleAnchor = document.createElement("a");
+      titleAnchor.href = rowData.titleHref;
+      titleAnchor.textContent = rowData.title;
+      titleAnchor.className = "quote-title-link";
+      titleCell.appendChild(titleAnchor);
+    } else {
+      titleCell.textContent = rowData.title;
+    }
+
+    rowData.detailLines.forEach((line, index) => {
+      const detailLine = document.createElement("div");
+      detailLine.textContent = line;
+      detailLine.className =
+        index < rowData.optionLineCount
+          ? "quote-detail-line option-line"
+          : "quote-detail-line spec-line";
+      titleCell.appendChild(detailLine);
+    });
+
+    itemRow.appendChild(titleCell);
+
+    const skuCell = document.createElement("td");
+    skuCell.className = "quote-sku-cell";
+    skuCell.textContent = rowData.sku;
+    itemRow.appendChild(skuCell);
+
+    const priceCell = document.createElement("td");
+    priceCell.className = "quote-price-cell";
+    priceCell.textContent = rowData.priceText;
+    itemRow.appendChild(priceCell);
+
+    const quantityCell = document.createElement("td");
+    quantityCell.className = "quote-quantity-cell";
+    quantityCell.textContent = rowData.quantityText;
+    itemRow.appendChild(quantityCell);
+
+    const totalCell = document.createElement("td");
+    totalCell.className = "quote-total-cell";
+    totalCell.textContent = rowData.lineTotalText;
+    itemRow.appendChild(totalCell);
+
+    tableBody.appendChild(itemRow);
+  });
+
+  root.appendChild(quoteTableWrapper);
+
+  if (model.grandTotalText) {
+    const grandTotalContainer = document.createElement("div");
+    grandTotalContainer.className = "grand-total";
+
+    const grandTotalLabel = document.createElement("span");
+    grandTotalLabel.className = "grand-total-label";
+    grandTotalLabel.textContent = "Grand Total: ";
+    grandTotalContainer.appendChild(grandTotalLabel);
+
+    const grandTotalValue = document.createElement("span");
+    grandTotalValue.textContent = model.grandTotalText;
+    grandTotalContainer.appendChild(grandTotalValue);
+
+    root.appendChild(grandTotalContainer);
+  }
+
+  const footerContainer = document.createElement("div");
+  footerContainer.className = "pdf-footer";
+  footerContainer.innerHTML = model.footer.disclaimerHtml;
+  root.appendChild(footerContainer);
+
+  if (model.compatibility) {
+    const compatibilitySection = document.createElement("div");
+    compatibilitySection.className = "compatibility-section";
+
+    const matrixHeading = document.createElement("div");
+    matrixHeading.className = "compatibility-title";
+    matrixHeading.textContent = "Cart Compatibility Matrix";
+    compatibilitySection.appendChild(matrixHeading);
+
+    const matrixIntro = document.createElement("div");
+    matrixIntro.className = "compatibility-intro";
+    matrixIntro.textContent =
+      "This section checks only laptops and docks/hubs/monitors currently in this cart.";
+    compatibilitySection.appendChild(matrixIntro);
+
+    if (!model.compatibility.matrixAvailable) {
+      const matrixUnavailable = document.createElement("div");
+      matrixUnavailable.className = "compatibility-unmapped-row";
+      matrixUnavailable.textContent =
+        "Matrix unavailable: matching laptop and dock/hub/monitor entries were not both found.";
+      compatibilitySection.appendChild(matrixUnavailable);
+    } else {
+      model.compatibility.matrixTables.forEach((tableChunk) => {
+        const matrixTable = document.createElement("table");
+        matrixTable.className = "compatibility-table";
+
+        const tableHead = document.createElement("thead");
+        const tableBody = document.createElement("tbody");
+        const headerRow = document.createElement("tr");
+
+        const laptopHeader = document.createElement("th");
+        laptopHeader.className = "compatibility-laptop";
+        laptopHeader.textContent = "Laptop";
+        headerRow.appendChild(laptopHeader);
+
+        tableChunk.dockChunk.forEach((dockSku) => {
+          const dockHeader = document.createElement("th");
+          const dockData = model.compatibility.visibleDocks[dockSku] || {};
+          dockHeader.textContent = dockData.name || dockSku;
+          headerRow.appendChild(dockHeader);
+        });
+
+        tableHead.appendChild(headerRow);
+        matrixTable.appendChild(tableHead);
+        matrixTable.appendChild(tableBody);
+
+        tableChunk.rows.forEach((rowData) => {
+          const row = document.createElement("tr");
+          row.className = "avoid-break";
+
+          const computerCell = document.createElement("td");
+          computerCell.className = "compatibility-computer";
+          computerCell.textContent = rowData.computerName;
+          row.appendChild(computerCell);
+
+          rowData.cells.forEach((cellData) => {
+            const compatibilityCell = document.createElement("td");
+            compatibilityCell.className = "compatibility-cell";
+            compatibilityCell.textContent = cellData.statusText;
+            compatibilityCell.style.backgroundColor = cellData.backgroundColor;
+
+            if (cellData.noteIndex) {
+              const superscript = document.createElement("sup");
+              superscript.textContent = ` ${cellData.noteIndex}`;
+              compatibilityCell.appendChild(superscript);
+            }
+
+            row.appendChild(compatibilityCell);
+          });
+
+          tableBody.appendChild(row);
+        });
+
+        compatibilitySection.appendChild(matrixTable);
+      });
+
+      const legend = document.createElement("div");
+      legend.className = "compatibility-legend";
+      legend.textContent =
+        "Legend: Compatible (green), Partial (yellow), Incompatible (red).";
+      compatibilitySection.appendChild(legend);
+    }
+
+    if (model.compatibility.notes.length) {
+      const notesHeader = document.createElement("div");
+      notesHeader.className = "compatibility-notes-title";
+      notesHeader.textContent = "Compatibility Notes";
+      compatibilitySection.appendChild(notesHeader);
+
+      model.compatibility.notes.forEach((note) => {
+        const noteItem = document.createElement("div");
+        noteItem.className = "compatibility-note";
+
+        const noteNumber = document.createElement("span");
+        noteNumber.className = "compatibility-note-number";
+        noteNumber.textContent = `${note.index}.`;
+
+        const noteContent = document.createElement("span");
+        noteContent.className = "compatibility-note-text";
+        noteContent.textContent = `${note.computerName} + ${note.dockName}: ${note.text}`;
+
+        noteItem.appendChild(noteNumber);
+        noteItem.appendChild(noteContent);
+        compatibilitySection.appendChild(noteItem);
+      });
+    }
+
+    if (model.compatibility.unmappedItems.length) {
+      const unmappedHeader = document.createElement("div");
+      unmappedHeader.className = "compatibility-unmapped-title";
+      unmappedHeader.textContent = "Not included in matrix";
+      compatibilitySection.appendChild(unmappedHeader);
+
+      model.compatibility.unmappedItems
+        .map((item) => getUnmappedCompatibilityItemText(item))
+        .filter(Boolean)
+        .forEach((itemText) => {
+          const row = document.createElement("div");
+          row.className = "compatibility-unmapped-row";
+          row.textContent = `- ${itemText}`;
+          compatibilitySection.appendChild(row);
+        });
+    }
+
+    root.appendChild(compatibilitySection);
+  }
+
+  return root;
+}
+
+// =========================================
+// Pagination Layer
+// =========================================
+
+function buildQuoteTableChunk(
+  wrapperClassName,
+  columnClasses,
+  headerCells,
+  rowNodes,
+) {
+  const wrapper = document.createElement("div");
+  wrapper.className = wrapperClassName;
+
+  const table = document.createElement("table");
+  wrapper.appendChild(table);
+
+  const columnGroup = document.createElement("colgroup");
+  columnClasses.forEach((className) => {
+    const column = document.createElement("col");
+    column.className = className;
+    columnGroup.appendChild(column);
+  });
+  table.appendChild(columnGroup);
+
+  const tableHead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  headerCells.forEach((cell) => {
+    const headerCell = document.createElement("th");
+    headerCell.textContent = cell.text;
+    headerCell.className = cell.className;
+    if (cell.colSpan > 1) {
+      headerCell.colSpan = cell.colSpan;
+    }
+    if (cell.rowSpan > 1) {
+      headerCell.rowSpan = cell.rowSpan;
+    }
+    headerRow.appendChild(headerCell);
+  });
+  tableHead.appendChild(headerRow);
+  table.appendChild(tableHead);
+
+  const tableBody = document.createElement("tbody");
+  rowNodes.forEach((rowNode) => {
+    tableBody.appendChild(rowNode.cloneNode(true));
+  });
+  table.appendChild(tableBody);
+
+  return wrapper;
+}
+
+function parseQuoteTableStructure(quoteTableWrapper) {
+  const quoteTable = quoteTableWrapper.querySelector("table");
+  const quoteBody = quoteTable?.querySelector("tbody");
+  const quoteHeadRow = quoteTable?.querySelector("thead tr");
+  const quoteColumnNodes = quoteTable
+    ? Array.from(quoteTable.querySelectorAll("colgroup col"))
+    : [];
+  const quoteRows = quoteBody ? Array.from(quoteBody.children) : [];
+
+  if (!quoteTable || !quoteBody || !quoteHeadRow || !quoteRows.length) {
+    return null;
+  }
+
+  const columnClasses = quoteColumnNodes.map(
+    (columnNode) => columnNode.className,
+  );
+  const headerCells = Array.from(quoteHeadRow.children).map((cellNode) => ({
+    text: cellNode.textContent || "",
+    className: cellNode.className,
+    colSpan: cellNode.colSpan || 1,
+    rowSpan: cellNode.rowSpan || 1,
+  }));
+
+  return {
+    wrapperClassName: quoteTableWrapper.className,
+    columnClasses,
+    headerCells,
+    rowTemplates: quoteRows,
+  };
+}
+
+function buildQuoteTableFromStructure(quoteTableStructure, rowNodes) {
+  return buildQuoteTableChunk(
+    quoteTableStructure.wrapperClassName,
+    quoteTableStructure.columnClasses,
+    quoteTableStructure.headerCells,
+    rowNodes,
+  );
+}
+
+function buildCompatibilityTableChunk(
+  tableAttributes,
+  nonBodyChildren,
+  rowNodes,
+) {
+  const chunkTable = document.createElement("table");
+  tableAttributes.forEach((attribute) => {
+    chunkTable.setAttribute(attribute.name, attribute.value);
+  });
+
+  nonBodyChildren.forEach((childNode) => {
+    chunkTable.appendChild(childNode.cloneNode(true));
+  });
+
+  const chunkBody = document.createElement("tbody");
+  rowNodes.forEach((rowNode) => {
+    chunkBody.appendChild(rowNode.cloneNode(true));
+  });
+  chunkTable.appendChild(chunkBody);
+
+  return chunkTable;
+}
+
+function parseCompatibilityTableStructure(compatibilityTable) {
+  const tableBody = compatibilityTable.querySelector("tbody");
+  const tableRows = tableBody ? Array.from(tableBody.children) : [];
+
+  if (!tableBody || !tableRows.length) {
+    return null;
+  }
+
+  return {
+    tableAttributes: Array.from(compatibilityTable.attributes).map(
+      (attribute) => ({
+        name: attribute.name,
+        value: attribute.value,
+      }),
+    ),
+    nonBodyChildren: Array.from(compatibilityTable.children).filter(
+      (childNode) => childNode.tagName !== "TBODY",
+    ),
+    rowTemplates: tableRows,
+  };
+}
+
+function buildCompatibilityTableFromStructure(
+  compatibilityTableStructure,
+  rowNodes,
+) {
+  return buildCompatibilityTableChunk(
+    compatibilityTableStructure.tableAttributes,
+    compatibilityTableStructure.nonBodyChildren,
+    rowNodes,
+  );
+}
+
+function splitCompatibilitySectionIntoBlocks(compatibilitySection) {
+  const sectionChildren = Array.from(compatibilitySection.children);
+  if (!sectionChildren.length) {
+    return [{ node: compatibilitySection, keepWithNext: false }];
+  }
+
+  const blocks = [];
+  const headingClasses = new Set([
+    "compatibility-title",
+    "compatibility-intro",
+  ]);
+  const introBlock = document.createElement("div");
+  introBlock.className = compatibilitySection.className;
+
+  let childIndex = 0;
+  while (
+    childIndex < sectionChildren.length &&
+    headingClasses.has(sectionChildren[childIndex].className)
+  ) {
+    introBlock.appendChild(sectionChildren[childIndex]);
+    childIndex += 1;
+  }
+
+  if (introBlock.children.length > 0) {
+    blocks.push({ node: introBlock, keepWithNext: true });
+  }
+
+  for (; childIndex < sectionChildren.length; childIndex += 1) {
+    const childNode = sectionChildren[childIndex];
+
+    if (childNode.classList.contains("compatibility-table")) {
+      const parsedCompatibilityTable = parseCompatibilityTableStructure(childNode);
+      if (!parsedCompatibilityTable) {
+        blocks.push({ node: childNode, keepWithNext: false });
+        continue;
+      }
+
+      blocks.push({
+        keepWithNext: false,
+        adaptiveCompatibilityTable: true,
+        compatibilityTable: parsedCompatibilityTable,
+      });
+      continue;
+    }
+
+    blocks.push({
+      node: childNode,
+      keepWithNext:
+        childNode.classList.contains("compatibility-notes-title") ||
+        childNode.classList.contains("compatibility-unmapped-title"),
+    });
+  }
+
+  if (!blocks.length) {
+    return [{ node: compatibilitySection, keepWithNext: false }];
+  }
+
+  return blocks;
+}
+
+function buildPaginableBlocks(root) {
+  const blocks = [];
+
+  function isAdaptiveTableBlock(block) {
+    return Boolean(block.adaptiveQuoteTable || block.adaptiveCompatibilityTable);
+  }
+
+  function mergeKeepWithNextBlocks(blockList) {
+    const mergedBlocks = [];
+
+    for (let index = 0; index < blockList.length; index += 1) {
+      const block = blockList[index];
+      if (!block.keepWithNext || index >= blockList.length - 1) {
+        mergedBlocks.push(block);
+        continue;
+      }
+
+      const nextBlock = blockList[index + 1];
+      if (isAdaptiveTableBlock(block) || isAdaptiveTableBlock(nextBlock)) {
+        mergedBlocks.push(block);
+        continue;
+      }
+
+      const combinedWrapper = document.createElement("div");
+      combinedWrapper.className = "keep-with-next-group";
+      combinedWrapper.appendChild(block.node);
+      combinedWrapper.appendChild(nextBlock.node);
+
+      mergedBlocks.push({
+        node: combinedWrapper,
+        keepWithNext: nextBlock.keepWithNext,
+      });
+
+      index += 1;
+    }
+
+    return mergedBlocks;
+  }
+
+  Array.from(root.children).forEach((node) => {
+    if (node.classList.contains("pdf-header")) {
+      blocks.push({ node, keepWithNext: true });
+      return;
+    }
+
+    if (node.classList.contains("quote-table")) {
+      const parsedQuoteTable = parseQuoteTableStructure(node);
+      if (!parsedQuoteTable) {
+        blocks.push({ node, keepWithNext: false });
+        return;
+      }
+
+      blocks.push({
+        keepWithNext: false,
+        adaptiveQuoteTable: true,
+        quoteTable: parsedQuoteTable,
+      });
+      return;
+    }
+
+    if (node.classList.contains("grand-total")) {
+      blocks.push({ node, keepWithNext: true });
+      return;
+    }
+
+    if (node.classList.contains("compatibility-section")) {
+      blocks.push(...splitCompatibilitySectionIntoBlocks(node));
+      return;
+    }
+
+    blocks.push({ node, keepWithNext: false });
+  });
+
+  return mergeKeepWithNextBlocks(blocks);
+}
+
+function hasMeaningfulText(node) {
+  if (!node) {
+    return false;
+  }
+
+  return Boolean(node.textContent && node.textContent.trim());
+}
+
+function hasMeaningfulTableRows(page, tableSelector) {
+  if (!page) {
+    return false;
+  }
+
+  const tableRows = Array.from(page.querySelectorAll(`${tableSelector} tbody tr`));
+  return tableRows.some((row) => hasMeaningfulText(row));
+}
+
+function hasMeaningfulSelectorText(page, selector) {
+  if (!page) {
+    return false;
+  }
+
+  const matchedNodes = Array.from(page.querySelectorAll(selector));
+  return matchedNodes.some((node) => hasMeaningfulText(node));
+}
+
+function isMeaningfulPdfPage(page) {
+  if (!page) {
+    return false;
+  }
+
+  const meaningfulTextSelectors = [
+    ".pdf-header .pdf-title",
+    ".pdf-date",
+    ".grand-total",
+    ".pdf-footer p",
+    ".compatibility-note",
+    ".compatibility-unmapped-row",
+    ".compatibility-legend",
+  ];
+
+  if (hasMeaningfulTableRows(page, ".quote-table")) {
+    return true;
+  }
+
+  if (hasMeaningfulTableRows(page, ".compatibility-table")) {
+    return true;
+  }
+
+  return meaningfulTextSelectors.some((selector) =>
+    hasMeaningfulSelectorText(page, selector),
+  );
+}
+
+function paginateDocument(root, metrics) {
+  if (!root) {
+    throw new Error("Cannot paginate without a root node.");
+  }
+
+  updatePdfPageSizing(metrics);
+
+  const pages = [];
+  let currentPage = null;
+  const pagedRoot = document.createElement("div");
+  pagedRoot.id = "pdf-container";
+  document.body.appendChild(pagedRoot);
+
+  function isMeaningfulPage(page) {
+    return isMeaningfulPdfPage(page);
+  }
+
+  function removePageFromState(page) {
+    if (!page) {
+      return;
+    }
+
+    const pageIndex = pages.indexOf(page);
+    if (pageIndex !== -1) {
+      pages.splice(pageIndex, 1);
+    }
+
+    if (page.parentNode) {
+      page.remove();
+    }
+  }
+
+  function ensureCurrentPageIsMounted() {
+    if (!currentPage || currentPage.parentNode === pagedRoot) {
+      return;
+    }
+
+    pagedRoot.appendChild(currentPage);
+  }
+
+  function createPage() {
+    if (currentPage && !isMeaningfulPage(currentPage)) {
+      removePageFromState(currentPage);
+      currentPage = pages.length ? pages[pages.length - 1] : null;
+    }
+
+    const page = document.createElement("div");
+    page.className = "pdf-page";
+    currentPage = page;
+    pages.push(page);
+    return page;
+  }
+
+  function appendNode(node) {
+    if (!currentPage) {
+      createPage();
+    }
+
+    ensureCurrentPageIsMounted();
+
+    currentPage.appendChild(node);
+  }
+
+  function appendBlockWithOverflowCheck(node) {
+    appendNode(node);
+    if (!isOverflowing()) {
+      return;
+    }
+
+    currentPage.removeChild(node);
+    createPage();
+    appendNode(node);
+  }
+
+  function isOverflowing() {
+    if (!currentPage) {
+      return false;
+    }
+
+    return currentPage.scrollHeight > metrics.contentHeightPx;
+  }
+
+  function pageHasContent() {
+    return Boolean(currentPage && currentPage.children.length > 0);
+  }
+
+  function pageHasOnlyQuoteHeader() {
+    if (!currentPage || currentPage.children.length !== 1) {
+      return false;
+    }
+
+    return currentPage.children[0].classList.contains("pdf-header");
+  }
+
+  function pageHasOnlyCompatibilityIntro() {
+    if (!currentPage || currentPage.children.length !== 1) {
+      return false;
+    }
+
+    const compatibilitySection = currentPage.children[0];
+    if (!compatibilitySection.classList.contains("compatibility-section")) {
+      return false;
+    }
+
+    const introNodes = Array.from(
+      compatibilitySection.querySelectorAll(
+        ".compatibility-title, .compatibility-intro",
+      ),
+    );
+    if (!introNodes.length) {
+      return false;
+    }
+
+    const hasOnlyIntroChildren = Array.from(compatibilitySection.children).every(
+      (childNode) =>
+        childNode.classList.contains("compatibility-title") ||
+        childNode.classList.contains("compatibility-intro"),
+    );
+    if (!hasOnlyIntroChildren) {
+      return false;
+    }
+
+    if (
+      compatibilitySection.querySelector(".compatibility-table tbody tr") ||
+      compatibilitySection.querySelector(".compatibility-note") ||
+      compatibilitySection.querySelector(".compatibility-unmapped-row") ||
+      compatibilitySection.querySelector(".compatibility-legend")
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function canFitNodeOnCurrentPage(node) {
+    appendNode(node);
+    const overflowed = isOverflowing();
+    currentPage.removeChild(node);
+    return !overflowed;
+  }
+
+  function measureFittingRowCount(remainingRows, buildChunkNode) {
+    let fittingRowCount = 0;
+
+    for (
+      let candidateRowCount = 1;
+      candidateRowCount <= remainingRows.length;
+      candidateRowCount += 1
+    ) {
+      const candidateChunk = buildChunkNode(
+        remainingRows.slice(0, candidateRowCount),
+      );
+      appendNode(candidateChunk);
+      const overflowed = isOverflowing();
+      currentPage.removeChild(candidateChunk);
+
+      if (overflowed) {
+        break;
+      }
+
+      fittingRowCount = candidateRowCount;
+    }
+
+    return fittingRowCount;
+  }
+
+  function appendAdaptiveTableRows(tableStructure, buildTableNode) {
+    if (!tableStructure || !Array.isArray(tableStructure.rowTemplates)) {
+      return false;
+    }
+
+    const allRows = tableStructure.rowTemplates;
+    if (!allRows.length) {
+      return false;
+    }
+
+    if (!currentPage) {
+      createPage();
+    }
+
+    let hadPriorPageContent = pageHasContent();
+    if (hadPriorPageContent) {
+      const fullTableNode = buildTableNode(allRows);
+      if (!canFitNodeOnCurrentPage(fullTableNode)) {
+        if (!pageHasOnlyQuoteHeader() && !pageHasOnlyCompatibilityIntro()) {
+          createPage();
+          hadPriorPageContent = false;
+        }
+      }
+    }
+
+    let hasRetriedTinyFirstChunk = false;
+    let nextRowStartIndex = 0;
+
+    while (nextRowStartIndex < allRows.length) {
+      const remainingRows = allRows.slice(nextRowStartIndex);
+      let fittingRowCount = measureFittingRowCount(remainingRows, buildTableNode);
+
+      const canRetryTinyFirstChunk =
+        !hasRetriedTinyFirstChunk &&
+        hadPriorPageContent &&
+        !pageHasOnlyQuoteHeader() &&
+        !pageHasOnlyCompatibilityIntro() &&
+        fittingRowCount === 1 &&
+        remainingRows.length > 1;
+
+      if (canRetryTinyFirstChunk) {
+        createPage();
+        hadPriorPageContent = false;
+        hasRetriedTinyFirstChunk = true;
+        continue;
+      }
+
+      if (fittingRowCount === 0) {
+        const shouldCreateOverflowPage =
+          pageHasContent() &&
+          !pageHasOnlyQuoteHeader() &&
+          !pageHasOnlyCompatibilityIntro();
+
+        if (shouldCreateOverflowPage) {
+          createPage();
+          hadPriorPageContent = false;
+          continue;
+        }
+
+        const oversizedChunk = buildTableNode(remainingRows.slice(0, 1));
+        appendNode(oversizedChunk);
+        nextRowStartIndex += 1;
+        hadPriorPageContent = true;
+
+        if (nextRowStartIndex < allRows.length) {
+          createPage();
+          hadPriorPageContent = false;
+        }
+
+        continue;
+      }
+
+      const tableChunk = buildTableNode(remainingRows.slice(0, fittingRowCount));
+      appendNode(tableChunk);
+      nextRowStartIndex += fittingRowCount;
+      hadPriorPageContent = true;
+
+      if (nextRowStartIndex < allRows.length) {
+        createPage();
+        hadPriorPageContent = false;
+      }
+    }
+
+    return true;
+  }
+
+  function appendAdaptiveQuoteTable(block) {
+    const quoteTable = block.quoteTable;
+    const wasHandled = appendAdaptiveTableRows(quoteTable, (rowNodes) =>
+      buildQuoteTableFromStructure(quoteTable, rowNodes),
+    );
+
+    if (!wasHandled && block.node) {
+      appendBlockWithOverflowCheck(block.node);
+    }
+  }
+
+  function appendAdaptiveCompatibilityTable(block) {
+    const compatibilityTable = block.compatibilityTable;
+    const wasHandled = appendAdaptiveTableRows(compatibilityTable, (rowNodes) =>
+      buildCompatibilityTableFromStructure(compatibilityTable, rowNodes),
+    );
+
+    if (!wasHandled && block.node) {
+      appendBlockWithOverflowCheck(block.node);
+    }
+  }
+
+  const blocks = buildPaginableBlocks(root);
+  blocks.forEach((block) => {
+    if (block.adaptiveQuoteTable) {
+      appendAdaptiveQuoteTable(block);
+      return;
+    }
+
+    if (block.adaptiveCompatibilityTable) {
+      appendAdaptiveCompatibilityTable(block);
+      return;
+    }
+
+    appendBlockWithOverflowCheck(block.node);
+  });
+
+  const renderedPages = Array.from(pagedRoot.querySelectorAll(".pdf-page"));
+  for (let pageIndex = renderedPages.length - 1; pageIndex >= 0; pageIndex -= 1) {
+    const page = renderedPages[pageIndex];
+    if (isMeaningfulPage(page)) {
+      break;
+    }
+
+    removePageFromState(page);
+  }
+
+  if (pagedRoot.parentNode) {
+    pagedRoot.remove();
+  }
+
+  return pagedRoot;
+}
+
+// =========================================
+// PDF Export Layer
+// =========================================
+
+async function exportPdf(container, opt) {
+  if (!container) {
+    throw new Error("Cannot export PDF without a container.");
+  }
+
+  if (typeof html2pdf !== "function") {
+    throw new Error("html2pdf is unavailable for quote PDF export.");
+  }
+
+  const exportClassName = "pdf-exporting";
+  const hadExportClass = container.classList.contains(exportClassName);
+  container.classList.add(exportClassName);
+
+  document.body.appendChild(container);
+
+  try {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    const pageNodes = Array.from(container.querySelectorAll(".pdf-page"));
+    const meaningfulPageNodes = pageNodes.filter((pageNode) =>
+      isMeaningfulPdfPage(pageNode),
+    );
+    if (!meaningfulPageNodes.length) {
+      throw new Error("No paginated PDF pages were found for export.");
+    }
+
+    const marginArray = Array.isArray(opt?.margin) ? opt.margin : PDF_MARGIN_MM;
+    const marginTop = Number(marginArray[0]) || 0;
+    const marginRight = Number(marginArray[1]) || 0;
+    const marginBottom = Number(marginArray[2]) || 0;
+    const marginLeft = Number(marginArray[3]) || 0;
+    const html2canvasOptions = {
+      scale: 1.5,
+      ...(opt?.html2canvas || {}),
+      scrollX: 0,
+      scrollY: 0,
+      allowTaint: false,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+    };
+
+    const imageType =
+      typeof opt?.image?.type === "string" &&
+      opt.image.type.toLowerCase() === "png"
+        ? "PNG"
+        : "JPEG";
+    const imageMimeType = imageType === "PNG" ? "image/png" : "image/jpeg";
+    const imageQuality =
+      typeof opt?.image?.quality === "number" ? opt.image.quality : 0.98;
+
+    const firstPageNode = meaningfulPageNodes[0];
+    const firstCaptureWidth = Math.max(
+      1,
+      Math.max(firstPageNode.scrollWidth, firstPageNode.offsetWidth),
+    );
+    const firstCaptureHeight = Math.max(
+      1,
+      Math.max(firstPageNode.scrollHeight, firstPageNode.offsetHeight),
+    );
+
+    const firstPageWorker = html2pdf()
+      .from(firstPageNode)
+      .set({
+        ...opt,
+        pagebreak: { mode: [] },
+        html2canvas: {
+          ...html2canvasOptions,
+          width: firstCaptureWidth,
+          height: firstCaptureHeight,
+          windowWidth: firstCaptureWidth,
+          windowHeight: firstCaptureHeight,
+        },
+      })
+      .toPdf();
+
+    const pdf = await firstPageWorker.get("pdf");
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const maxRenderWidth = Math.max(1, pageWidth - marginLeft - marginRight);
+    const maxRenderHeight = Math.max(1, pageHeight - marginTop - marginBottom);
+
+    for (
+      let pageIndex = 1;
+      pageIndex < meaningfulPageNodes.length;
+      pageIndex += 1
+    ) {
+      const pageNode = meaningfulPageNodes[pageIndex];
+      const captureWidth = Math.max(
+        1,
+        Math.max(pageNode.scrollWidth, pageNode.offsetWidth),
+      );
+      const captureHeight = Math.max(
+        1,
+        Math.max(pageNode.scrollHeight, pageNode.offsetHeight),
+      );
+
+      const canvas = await html2pdf()
+        .from(pageNode)
+        .set({
+          html2canvas: {
+            ...html2canvasOptions,
+            width: captureWidth,
+            height: captureHeight,
+            windowWidth: captureWidth,
+            windowHeight: captureHeight,
+          },
+          pagebreak: { mode: [] },
+        })
+        .toCanvas()
+        .get("canvas");
+
+      let renderWidth = maxRenderWidth;
+      let renderHeight = (canvas.height * renderWidth) / canvas.width;
+      if (renderHeight > maxRenderHeight) {
+        const scaleFactor = maxRenderHeight / renderHeight;
+        renderHeight = maxRenderHeight;
+        renderWidth *= scaleFactor;
+      }
+
+      pdf.addPage();
+      const offsetX = marginLeft;
+      const imageData = canvas.toDataURL(imageMimeType, imageQuality);
+      pdf.addImage(
+        imageData,
+        imageType,
+        offsetX,
+        marginTop,
+        renderWidth,
+        renderHeight,
+      );
+    }
+
+    const pageCount = pdf.internal.getNumberOfPages();
+    pdf.setFontSize(10);
+    pdf.setTextColor(80, 80, 80);
+
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+      pdf.setPage(pageNumber);
+      pdf.text(`Page ${pageNumber} of ${pageCount}`, pageWidth / 2, pageHeight - 10, {
+        align: "center",
+      });
+    }
+
+    pdf.save(opt?.filename || "TechHub Quote.pdf");
+  } finally {
+    if (!hadExportClass) {
+      container.classList.remove(exportClassName);
+    }
+    if (container.parentNode) {
+      container.remove();
+    }
+  }
+}
+
+function cloneFixtureData(value) {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  return JSON.parse(JSON.stringify(value));
+}
+
+function createFixtureSnapshot({ cartData, compatibilityData, model }) {
+  const pathname =
+    typeof window !== "undefined" ? window.location.pathname : "";
+  return {
+    capturedAt: new Date().toISOString(),
+    version: QUOTE_PDF_FIXTURE_VERSION,
+    pathname,
+    cartData: cloneFixtureData(cartData),
+    compatibilityData: cloneFixtureData(compatibilityData),
+    model: cloneFixtureData(model),
+  };
+}
+
+function setLatestFixtureSnapshot(snapshot) {
+  latestQuotePdfSnapshot = snapshot ? cloneFixtureData(snapshot) : null;
+}
+
+function getLatestFixtureSnapshot() {
+  return latestQuotePdfSnapshot
+    ? cloneFixtureData(latestQuotePdfSnapshot)
+    : null;
+}
+
+function buildQuoteExportOptions(model) {
+  return {
+    margin: PDF_MARGIN_MM,
+    filename: `TechHub Quote - ${model.header.dateText}.pdf`,
+    image: { type: "jpeg", quality: 0.98 },
+    html2canvas: {
+      scale: 1.5,
+      useCORS: true,
+      allowTaint: false,
+      backgroundColor: "#ffffff",
+      logging: false,
+    },
+    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+  };
+}
+
+async function renderAndPaginateModel(model) {
+  injectQuoteStyles();
+  await waitForFontsReady();
+
+  const renderedRoot = renderQuoteDocument(model);
+  const paginationMetrics = getPdfContentMetrics();
+  return paginateDocument(renderedRoot, paginationMetrics);
+}
+
+function buildModelFromFixture(fixture) {
+  if (!fixture || typeof fixture !== "object") {
+    throw new Error("Fixture must be a non-null object.");
+  }
+
+  const cartData =
+    fixture.cartData && typeof fixture.cartData === "object"
+      ? fixture.cartData
+      : { items: [], grandTotalText: "" };
+  const compatibilityData = fixture.compatibilityData || null;
+
+  const fixtureDate = fixture.capturedAt
+    ? new Date(fixture.capturedAt)
+    : new Date();
+  const validDate = Number.isNaN(fixtureDate.getTime())
+    ? new Date()
+    : fixtureDate;
+
+  return {
+    cartData,
+    compatibilityData,
+    model: buildQuoteDocumentModel({
+      cartData,
+      compatibilityData,
+      date: validDate,
+    }),
+  };
+}
+
+function isQuotePdfTestEnabled() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return params.get(QUOTE_PDF_TEST_QUERY_PARAM) === "1";
+}
+
+function initializeQuotePdfTestNamespace() {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return;
+  }
+
+  if (!isQuotePdfTestEnabled()) {
+    return;
+  }
+
+  const testApi = {
+    captureLatest() {
+      return getLatestFixtureSnapshot();
+    },
+    downloadLatestFixture(filename) {
+      const snapshot = getLatestFixtureSnapshot();
+      if (!snapshot) {
+        throw new Error("No quote fixture snapshot is available yet.");
+      }
+
+      const fixtureText = JSON.stringify(snapshot, null, 2);
+      const blob = new Blob([fixtureText], { type: "application/json" });
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const safeFileName =
+        typeof filename === "string" && filename.trim()
+          ? filename.trim()
+          : `quote-fixture-${Date.now()}.json`;
+
+      anchor.href = downloadUrl;
+      anchor.download = safeFileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(downloadUrl);
+
+      return snapshot;
+    },
+    async loadFixtureFromObject(fixture) {
+      const { cartData, compatibilityData, model } =
+        buildModelFromFixture(fixture);
+      const snapshot = createFixtureSnapshot({
+        cartData,
+        compatibilityData,
+        model,
+      });
+      setLatestFixtureSnapshot(snapshot);
+
+      const pagedRoot = await renderAndPaginateModel(model);
+      const exportOptions = buildQuoteExportOptions(model);
+      await exportPdf(pagedRoot, exportOptions);
+
+      return {
+        pageCount: Array.from(pagedRoot.querySelectorAll(".pdf-page")).filter(
+          (pageNode) => isMeaningfulPdfPage(pageNode),
+        ).length,
+        snapshot,
+      };
+    },
+    async previewFixtureFromObject(fixture) {
+      const { cartData, compatibilityData, model } =
+        buildModelFromFixture(fixture);
+      const snapshot = createFixtureSnapshot({
+        cartData,
+        compatibilityData,
+        model,
+      });
+      setLatestFixtureSnapshot(snapshot);
+
+      const pagedRoot = await renderAndPaginateModel(model);
+      document.body.appendChild(pagedRoot);
+
+      return {
+        pageCount: Array.from(pagedRoot.querySelectorAll(".pdf-page")).filter(
+          (pageNode) => isMeaningfulPdfPage(pageNode),
+        ).length,
+        container: pagedRoot,
+        snapshot,
+      };
+    },
+  };
+
+  window[QUOTE_PDF_TEST_NAMESPACE] = testApi;
+}
+
+// =========================================
+// Entrypoint
+// =========================================
+
+async function generateQuotePdf() {
+  const cartData = extractCartData();
+  const compatibilityData = await buildCompatibilityData(cartData);
+  const model = buildQuoteDocumentModel({
+    cartData,
+    compatibilityData,
+    date: new Date(),
+  });
+  setLatestFixtureSnapshot(
+    createFixtureSnapshot({ cartData, compatibilityData, model }),
+  );
+
+  const pagedRoot = await renderAndPaginateModel(model);
+  const exportOptions = buildQuoteExportOptions(model);
+
+  await exportPdf(pagedRoot, exportOptions);
+}
+
+initializeQuotePdfTestNamespace();
 
 document.addEventListener("click", async function (event) {
   if (event.target && event.target.id === "generate-quote") {
-    console.log("Generate Quote button clicked");
-
-    // Create the header container
-    const headerContainer = document.createElement("div");
-    headerContainer.style.marginBottom = "20px";
-    headerContainer.style.fontFamily = "Open Sans, sans-serif";
-
-    // Create the title
-    const title = document.createElement("div");
-    title.textContent = "TechHub Quote";
-    title.style.fontSize = "24px"; // Adjust size as needed
-    title.style.color = "#500000";
-    headerContainer.appendChild(title);
-
-    // Create the date
-    const date = document.createElement("div");
-    const today = new Date();
-    const options = { year: "numeric", month: "long", day: "numeric" };
-    date.textContent = today.toLocaleDateString(undefined, options);
-    date.style.fontSize = "14px"; // Smaller size than the title
-    date.style.color = "#000000";
-    headerContainer.appendChild(date);
-
-    const QUOTE_ROWS_PER_TABLE = 10;
-
-    function createQuoteTable() {
-      const quoteTable = document.createElement("table");
-      quoteTable.style.width = "100%";
-      quoteTable.style.borderCollapse = "collapse";
-      quoteTable.style.tableLayout = "fixed";
-      quoteTable.style.marginBottom = "10px";
-
-      const columnGroup = document.createElement("colgroup");
-      ["46%", "14%", "14%", "10%", "16%"].forEach((width) => {
-        const column = document.createElement("col");
-        column.style.width = width;
-        columnGroup.appendChild(column);
-      });
-      quoteTable.appendChild(columnGroup);
-
-      const headerRow = document.createElement("tr");
-
-      const itemHeader = document.createElement("th");
-      itemHeader.textContent = "Item";
-      itemHeader.style.border = "1px solid #000";
-      itemHeader.style.padding = "8px";
-      itemHeader.style.textAlign = "left";
-      itemHeader.style.backgroundColor = "#f2f2f2";
-      itemHeader.colSpan = 2;
-      headerRow.appendChild(itemHeader);
-
-      const priceHeader = document.createElement("th");
-      priceHeader.textContent = "Price";
-      priceHeader.style.border = "1px solid #000";
-      priceHeader.style.padding = "8px";
-      priceHeader.style.textAlign = "right";
-      priceHeader.style.backgroundColor = "#f2f2f2";
-      headerRow.appendChild(priceHeader);
-
-      const quantityHeader = document.createElement("th");
-      quantityHeader.textContent = "Quantity";
-      quantityHeader.style.border = "1px solid #000";
-      quantityHeader.style.padding = "8px";
-      quantityHeader.style.textAlign = "right";
-      quantityHeader.style.backgroundColor = "#f2f2f2";
-      headerRow.appendChild(quantityHeader);
-
-      const totalHeader = document.createElement("th");
-      totalHeader.textContent = "Total";
-      totalHeader.style.border = "1px solid #000";
-      totalHeader.style.padding = "8px";
-      totalHeader.style.textAlign = "right";
-      totalHeader.style.backgroundColor = "#f2f2f2";
-      headerRow.appendChild(totalHeader);
-
-      quoteTable.appendChild(headerRow);
-      return quoteTable;
+    try {
+      await generateQuotePdf();
+    } catch (error) {
+      console.error("Quote PDF generation failed:", error);
     }
-
-    // Add item details
-    const items = document.querySelectorAll(".cart-item");
-    const quoteRows = [];
-    const cartItemsForCompatibility = [];
-    items.forEach((item) => {
-      const itemRow = document.createElement("tr");
-
-      // Get the title and URL
-      const titleLink = item.querySelector(".cart-item-title a");
-      const itemTitleText = titleLink
-        ? titleLink.innerText.trim()
-        : item.querySelector(".cart-item-title")?.innerText.trim() || "";
-      const titleCell = document.createElement("td");
-      titleCell.style.border = "1px solid #000";
-      titleCell.style.padding = "8px";
-      titleCell.style.textAlign = "left";
-      titleCell.style.overflowWrap = "anywhere";
-      titleCell.style.wordBreak = "break-word";
-      titleCell.colSpan = 1;
-
-      // Title content
-      if (titleLink) {
-        const titleAnchor = document.createElement("a");
-        titleAnchor.href = titleLink.href;
-        titleAnchor.textContent = itemTitleText;
-        titleAnchor.style.borderBottomColor = "transparent"; // Remove underline
-        titleCell.appendChild(titleAnchor);
-      } else {
-        titleCell.textContent = itemTitleText;
-      }
-
-      // Get all the options (if present) and append each one
-      const options = item.querySelectorAll(".cart-item-options");
-      options.forEach((option) => {
-        const optionsDiv = document.createElement("div");
-        optionsDiv.textContent = option.innerText.trim();
-        optionsDiv.style.fontSize = "12px";
-        optionsDiv.style.color = "#333";
-        optionsDiv.style.marginTop = "7px";
-        optionsDiv.style.paddingLeft = "10px";
-        titleCell.appendChild(optionsDiv);
-      });
-
-      // Get detailed specs from the definitionList (CPU, GPU, RAM, Storage)
-      const specDl = item.querySelector(".definitionList");
-      if (specDl) {
-        specDl.querySelectorAll("dt.definitionList-key").forEach((dt) => {
-          const dd = dt.nextElementSibling;
-          if (!dd) return;
-          const specDiv = document.createElement("div");
-          specDiv.style.fontSize = "12px";
-          specDiv.style.color = "#333";
-          specDiv.style.marginTop = "4px";
-          specDiv.style.paddingLeft = "10px";
-          specDiv.textContent = `${dt.textContent.trim()} ${dd.textContent.trim()}`;
-          titleCell.appendChild(specDiv);
-        });
-      }
-
-      // Add titleCell (with options & specs) to the row
-      itemRow.appendChild(titleCell);
-
-      // Get the SKU
-      const sku = item.querySelector(".cart-item-sku");
-      const skuCell = document.createElement("td");
-      const skuValue = normalizeSkuText(sku ? sku.innerText.trim() : "");
-      skuCell.textContent = skuValue;
-      skuCell.style.border = "1px solid #000";
-      skuCell.style.padding = "8px";
-      skuCell.style.textAlign = "left";
-      skuCell.style.verticalAlign = "middle";
-      skuCell.style.overflowWrap = "anywhere";
-      skuCell.style.wordBreak = "break-word";
-      itemRow.appendChild(skuCell);
-      if (skuValue || itemTitleText) {
-        cartItemsForCompatibility.push({
-          sku: skuValue,
-          title: itemTitleText,
-        });
-      }
-
-      // Get the price
-      const price = item.querySelector(
-        ".cart-item-block.cart-item-info .cart-item-value",
-      );
-      const priceCell = document.createElement("td");
-      priceCell.textContent = price ? price.innerText.trim() : "";
-      priceCell.style.border = "1px solid #000";
-      priceCell.style.padding = "8px";
-      priceCell.style.textAlign = "right";
-      priceCell.style.verticalAlign = "middle";
-      itemRow.appendChild(priceCell);
-
-      // Get the quantity
-      const quantity = item.querySelector(
-        ".cart-item-block.cart-item-info.cart-item-quantity .form-increment .form-input",
-      );
-      const quantityCell = document.createElement("td");
-      quantityCell.textContent = quantity ? quantity.value.trim() : "";
-      quantityCell.style.border = "1px solid #000";
-      quantityCell.style.padding = "8px";
-      quantityCell.style.textAlign = "right";
-      quantityCell.style.verticalAlign = "middle";
-      itemRow.appendChild(quantityCell);
-
-      // Calculate the line total from price and quantity
-      const priceText = priceCell.textContent;
-      const quantityText = quantityCell.textContent;
-      const priceValue = parseFloat(priceText.replace(/[^0-9.-]+/g, "")) || 0;
-      const quantityValue = parseInt(quantityText, 10) || 0;
-      const lineTotal = priceValue * quantityValue;
-      const totalFormatted = new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: "USD",
-      }).format(lineTotal);
-
-      // Build and append the Total cell
-      const totalCell = document.createElement("td");
-      totalCell.textContent = totalFormatted;
-      totalCell.style.border = "1px solid #000";
-      totalCell.style.padding = "8px";
-      totalCell.style.textAlign = "right";
-      totalCell.style.verticalAlign = "middle";
-      itemRow.appendChild(totalCell);
-
-      quoteRows.push(itemRow);
-    });
-
-    // Append the table to a container
-    const container = document.createElement("div");
-    container.id = "pdf-container";
-    container.appendChild(headerContainer);
-
-    const quoteRowChunks = chunkArray(quoteRows, QUOTE_ROWS_PER_TABLE);
-    if (!quoteRowChunks.length) {
-      quoteRowChunks.push([]);
-    }
-
-    quoteRowChunks.forEach((quoteRowChunk) => {
-      const quoteTable = createQuoteTable();
-      quoteRowChunk.forEach((row) => {
-        quoteTable.appendChild(row);
-      });
-      container.appendChild(quoteTable);
-    });
-
-    // Add grand total separately
-    const grandTotal = document.querySelector(
-      ".cart-total-value.cart-total-grandTotal",
-    );
-    if (grandTotal) {
-      const grandTotalContainer = document.createElement("div");
-      grandTotalContainer.style.marginTop = "20px";
-      grandTotalContainer.style.textAlign = "right";
-      grandTotalContainer.style.fontWeight = "bold";
-
-      const grandTotalLabel = document.createElement("span");
-      grandTotalLabel.textContent = "Grand Total: ";
-      grandTotalLabel.style.marginRight = "10px";
-      grandTotalContainer.appendChild(grandTotalLabel);
-
-      const grandTotalValue = document.createElement("span");
-      grandTotalValue.textContent = grandTotal.innerText.trim();
-      grandTotalContainer.appendChild(grandTotalValue);
-
-      container.appendChild(grandTotalContainer);
-    }
-
-    // Create the footer container
-    const footerContainer = document.createElement("div");
-    footerContainer.style.marginTop = "20px";
-    footerContainer.style.fontFamily = "Open Sans, sans-serif";
-    footerContainer.style.fontSize = "12px";
-    footerContainer.style.color = "#000000";
-    footerContainer.style.textAlign = "center";
-
-    const disclaimer = document.createElement("div");
-    disclaimer.innerHTML =
-      "<p><strong>Pricing and stock are subject to change.</strong> " +
-      "Quote pricing will be honored for 14 days while inventory lasts.</p>" +
-      "<p>An approved purchaser can log in to " +
-      '<a href="https://techhub.tamu.edu/" style="font-size: 12px;">TechHub</a> ' +
-      "to complete the purchase. See " +
-      '<a href="https://tamu.mybigcommerce.com/terms-and-conditions/" ' +
-      'style="font-size: 12px;">Terms and Conditions.</a></p>';
-    footerContainer.appendChild(disclaimer);
-    container.appendChild(footerContainer);
-
-    const compatibilitySection = document.createElement("div");
-    compatibilitySection.style.pageBreakBefore = "always";
-    compatibilitySection.style.breakBefore = "page";
-    await appendCartCompatibilityMatrix(
-      compatibilitySection,
-      cartItemsForCompatibility,
-    );
-    if (compatibilitySection.children.length) {
-      container.appendChild(compatibilitySection);
-    }
-
-    // Options for generating the PDF
-    const opt = {
-      margin: [20, 10, 20, 10], // top, right, bottom, left
-      filename: `TechHub Quote - ${today.toLocaleDateString(undefined, options)}.pdf`,
-      image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2 },
-      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-      pagebreak: { mode: ["css", "legacy"] },
-    };
-
-    // Generate the PDF
-    html2pdf()
-      .from(container)
-      .set(opt)
-      .toPdf()
-      .get("pdf")
-      .then(function (pdf) {
-        const totalPages = pdf.internal.getNumberOfPages();
-        for (let i = 1; i <= totalPages; i++) {
-          pdf.setPage(i);
-          pdf.setFontSize(10);
-          pdf.setTextColor(150);
-          pdf.text(
-            `Page ${i} of ${totalPages}`,
-            pdf.internal.pageSize.getWidth() - 20,
-            pdf.internal.pageSize.getHeight() - 10,
-          );
-        }
-      })
-      .save();
   }
 
-  // Send Quote functionality
   if (event.target && event.target.id === "send-quote") {
     event.preventDefault();
     console.log("Send Quote button clicked");
 
-    // Your logic for sending the quote goes here...
-
-    // Navigate to the specified URL in the same tab
     setTimeout(function () {
       window.location.href =
         "https://techhubtest.mybigcommerce.com/send-quote/";
