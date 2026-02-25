@@ -1675,11 +1675,52 @@ async function exportPdf(container, opt) {
   const hadExportClass = container.classList.contains(exportClassName);
   container.classList.add(exportClassName);
 
-  document.body.appendChild(container);
+  const exportIframe = document.createElement("iframe");
+  exportIframe.setAttribute("aria-hidden", "true");
+  exportIframe.setAttribute("tabindex", "-1");
+  exportIframe.style.position = "fixed";
+  exportIframe.style.left = "0";
+  exportIframe.style.top = "0";
+  exportIframe.style.width = "0";
+  exportIframe.style.height = "0";
+  exportIframe.style.border = "0";
+  exportIframe.style.pointerEvents = "none";
+
+  let exportDocument = null;
+  let exportWindow = null;
 
   try {
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    document.body.appendChild(exportIframe);
+
+    exportDocument = exportIframe.contentDocument;
+    exportWindow = exportIframe.contentWindow;
+
+    if (!exportDocument || !exportWindow) {
+      throw new Error("Unable to initialize hidden export iframe.");
+    }
+
+    exportDocument.open();
+    exportDocument.write("<!doctype html><html><head></head><body></body></html>");
+    exportDocument.close();
+
+    const styleTagIds = ["quote-pdf-styles", "quote-pdf-metrics"];
+    styleTagIds.forEach((styleTagId) => {
+      const sourceStyleTag = document.getElementById(styleTagId);
+      if (!sourceStyleTag || !sourceStyleTag.textContent) {
+        return;
+      }
+
+      const targetStyleTag = exportDocument.createElement("style");
+      targetStyleTag.id = styleTagId;
+      targetStyleTag.textContent = sourceStyleTag.textContent;
+      exportDocument.head.appendChild(targetStyleTag);
+    });
+
+    exportDocument.body.style.margin = "0";
+    exportDocument.body.appendChild(container);
+
+    await new Promise((resolve) => exportWindow.requestAnimationFrame(resolve));
+    await new Promise((resolve) => exportWindow.requestAnimationFrame(resolve));
 
     const pageNodes = Array.from(container.querySelectorAll(".pdf-page"));
     const meaningfulPageNodes = pageNodes.filter((pageNode) =>
@@ -1813,6 +1854,9 @@ async function exportPdf(container, opt) {
     }
     if (container.parentNode) {
       container.remove();
+    }
+    if (exportIframe.parentNode) {
+      exportIframe.remove();
     }
   }
 }
