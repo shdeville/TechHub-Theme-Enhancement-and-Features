@@ -1,3 +1,4 @@
+
 //Staging Version
 const COMPATIBILITY_DATA_URL =
   "https://store-jsj7fos9p1.mybigcommerce.com/content/JSON%20Files/Compatibility.json";
@@ -624,7 +625,10 @@ function buildQuoteDocumentModel({ cartData, compatibilityData, date }) {
     .map((rowData) => ({ sku: rowData.sku, title: rowData.title }))
     .filter((item) => item.sku || item.title);
 
-  const compatibilityModel = compatibilityData
+  const hasCompatibilitySides = Boolean(
+    compatibilityData && compatibilityData.matrixAvailable,
+  );
+  const compatibilityModel = hasCompatibilitySides
     ? {
         ...compatibilityData,
         matrixTables: compatibilityData.matrixTables.map((tableChunk) => ({
