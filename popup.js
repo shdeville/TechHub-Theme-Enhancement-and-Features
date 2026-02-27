@@ -1,4 +1,3 @@
-
 (function () {
   "use strict";
 
@@ -6,6 +5,7 @@
   // SETTINGS
   // =========================
   var STORAGE_KEY = "techhub_first_visit_notice_dismissed_v1";
+  var TWO_WEEKS = 1000 * 60 * 60 * 24 * 14;
 
   var MODAL_TITLE = "Please Note:";
   var MODAL_BODY =
@@ -20,17 +20,36 @@
   // =========================
   // HELPERS
   // =========================
-  function getDismissedState() {
+  function migrateOldValueIfNeeded() {
+    // Old script stored: "true"
+    // New script stores: timestamp string
     try {
-      return localStorage.getItem(STORAGE_KEY) === "true";
+      var v = localStorage.getItem(STORAGE_KEY);
+      if (v === "true") {
+        // Explicitly delete old value and replace with timestamp
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.setItem(STORAGE_KEY, Date.now().toString());
+      }
+    } catch (e) {}
+  }
+
+  function shouldShowModal() {
+    try {
+      var lastDismissed = localStorage.getItem(STORAGE_KEY);
+      if (!lastDismissed) return true;
+
+      var ts = parseInt(lastDismissed, 10);
+      if (!isFinite(ts)) return true; // anything weird => show
+
+      return (Date.now() - ts) > TWO_WEEKS;
     } catch (e) {
-      return false;
+      return true;
     }
   }
 
   function setDismissedState() {
     try {
-      localStorage.setItem(STORAGE_KEY, "true");
+      localStorage.setItem(STORAGE_KEY, Date.now().toString());
     } catch (e) {}
   }
 
@@ -69,6 +88,7 @@
     injectFontsOnce();
 
     var backdrop = document.createElement("div");
+    backdrop.id = "techhub-first-visit-backdrop";
     backdrop.style.position = "fixed";
     backdrop.style.inset = "0";
     backdrop.style.zIndex = "999999";
@@ -162,7 +182,10 @@
   // RUN
   // =========================
   onReady(function () {
-    if (!getDismissedState()) {
+    // One-time migration: old "true" -> timestamp
+    migrateOldValueIfNeeded();
+
+    if (shouldShowModal()) {
       showModal();
     }
   });
