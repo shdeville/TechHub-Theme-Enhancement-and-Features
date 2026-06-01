@@ -1,7 +1,8 @@
-
+// test version
 function displayStockNumber() {
     let noSkuCounter = 0; // Counter to track the number of times "No SKU available" occurs
     let intervalId; // Declare the interval ID for global access
+
     // Fetch the JSON file containing stock levels
     fetch('https://store-jje9unvzjs.mybigcommerce.com/content/Scripts/Testing/filteredResponse.json')
         .then(response => response.json())
@@ -13,10 +14,12 @@ function displayStockNumber() {
                 );
                 return skuElement ? skuElement.textContent.trim() : null;
             }
+
             // Function to get product data based on SKU
             function getProductData(sku) {
                 return data.find(p => p.sku === sku);
             }
+
             // Function to update the stock message using a real DOM element
             function updateStockMessageInElement(message) {
                 const incrementField = document.querySelector('.form-increment[data-quantity-change]');
@@ -24,11 +27,13 @@ function displayStockNumber() {
                     console.error("Increment field not found.");
                     return;
                 }
+
                 // Check if the message div already exists
                 let messageDiv = document.getElementById('dynamic-increment-message');
                 if (!messageDiv) {
                     messageDiv = document.createElement('div');
                     messageDiv.id = 'dynamic-increment-message';
+
                     // Style the message div
                     messageDiv.style.fontFamily = '"Work Sans", sans-serif';
                     messageDiv.style.fontSize = '15px';
@@ -36,11 +41,14 @@ function displayStockNumber() {
                     messageDiv.style.color = 'black';
                     messageDiv.style.marginTop = '15px';
                     messageDiv.style.textAlign = 'left';
+
                     // Append the message div after the increment field
                     incrementField.parentNode.insertBefore(messageDiv, incrementField.nextSibling);
                 }
+
                 // Update the content of the message div
                 messageDiv.innerHTML = message;
+
                 // Add hover event listeners to pause/resume updates
                 const link = messageDiv.querySelector('a');
                 if (link) {
@@ -50,72 +58,83 @@ function displayStockNumber() {
             }
 
             const inputElement = document.querySelector('#qty\\[\\]');
+
             function checkAndUpdateInputValue() {
                 const sku = getCurrentSKU();
                 if (!sku) {
                     noSkuCounter++;
                     console.log("No SKU available, not displaying stock message.");
-                    // Check if the counter has reached 25
                     if (noSkuCounter >= 25) {
                         console.log("No SKU available 25 times. Terminating script.");
-                        clearInterval(intervalId); // Stop the interval
+                        clearInterval(intervalId);
                         return;
                     }
                     return;
                 }
+
                 const product = getProductData(sku);
                 if (!product) {
                     console.error("SKU not found in the JSON file.");
                     return;
                 }
 
-                // Always re-grab the button in case Cornerstone re-rendered it
                 const addToCartButton = document.querySelector('#form-action-addToCart');
 
                 if (inputElement) {
                     const inputValue = parseInt(inputElement.value, 10) || 0;
 
-                    // === Updated block: compute stockNumber as Qty - bc_status9 - bc_status7 ===
+                    // Raw values from filteredResponse.json
                     const q = parseFloat(product.Qty) || 0;
+                    const po = parseFloat(product.quantityOnPurchaseOrder) || 0;
                     const b9 = parseFloat(product.bc_status9) || 0;
                     const b7 = parseFloat(product.bc_status7) || 0;
-                    const stockNumber = q - b9 - b7;
-                    // === End update ===
 
-                    const closeOut = product.Closeout === "Y";
+                    // Physical quantity available right now, after subtracting already-committed BC quantities.
+                    // This is used for customer messaging so closeout items do not incorrectly appear simply "In stock"
+                    // when the purchasable quantity is actually coming from quantityOnPurchaseOrder.
+                    const physicalStockNumberRaw = q - b9 - b7;
+                    const physicalStockNumber = Math.max(0, physicalStockNumberRaw);
+
+                    // Total customer-purchasable quantity, including incoming purchase orders.
+                    // This preserves the original effective availability logic.
+                    const stockNumber = physicalStockNumberRaw + po;
+
+                    const closeOut = String(product.Closeout || '').toUpperCase() === "Y";
+
+                    const unitLabel = (amount) => Math.abs(amount) === 1 ? 'unit' : 'units';
 
                     let message = '';
                     let disableButton = false;
 
-                    // === PATCH START: prioritize closeout, and disable when stock <= 0 OR qty exceeds stock ===
                     if (sku.toUpperCase().includes("SPECIAL")) {
-                        // SPECIAL SKUs: informational only
                         message = "Special order items come made-to-order from manufacturers, please expect longer lead times.";
-                    } else if (closeOut && (stockNumber < 1 || inputValue > stockNumber)) {
-                        const exceededQuantity = Math.max(0, inputValue - stockNumber);
-                        message = (stockNumber < 1)
-                            ? `This product selection is discontinued and out of stock. <br>We cannot accept orders for this model.`
-                            : `You have exceeded quantity in stock by ${exceededQuantity}.<br>We can only accept orders of quantity ${stockNumber} or less for this product. <br> <br>`;
-                        disableButton = true;
+                    } else if (closeOut) {
+                        if (stockNumber < 1) {
+                            message = `This product selection is discontinued and out of stock. <br>We cannot accept orders for this model.`;
+                            disableButton = true;
+                        } else if (inputValue > stockNumber) {
+                            const exceededQuantity = Math.max(0, inputValue - stockNumber);
+                            message = `You have exceeded quantity in stock by ${exceededQuantity}.<br><a href="https://service.tamu.edu/TDClient/36/Portal/Requests/TicketRequests/NewForm?ID=KN84p4nVmJQ_&RequestorType=ServiceOffering" target="_blank" rel="noopener noreferrer">Click here</a> to contact our team about placing a larger order.<br>`;
+                            disableButton = true;
+                        } else if (inputValue > physicalStockNumber) {
+                            const exceededOnHandQuantity = Math.max(0, inputValue - physicalStockNumber);
+                            message = `You have selected ${exceededOnHandQuantity} more ${unitLabel(exceededOnHandQuantity)} than we currently have physically in stock.<br> Additional inventory is on order but fulfillment may be delayed.<br>`;
+                        } else {
+                            message = `In stock. <br><br>`;
+                        }
                     } else if (stockNumber < 1) {
-                        // Non-closeout backorder case (button stays enabled)
                         message = "Item is on backorder. Order fulfillment will be delayed.";
-                    } else if (inputValue > 9 && !closeOut) {
-                        // Bulk order logic for non-closeout items
-                        message = `Ordering 10+ items is a bulk order. <a href="https://techhubtest.mybigcommerce.com/faqs/#:~:text=How%20do%20you%20place%20a%20bulk%20order%3F" target="_blank" rel="noopener noreferrer">Click here</a> to learn more. <br><br><br>`;
+                    } else if (inputValue > 9) {
+                        message = `Ordering 10+ items is a bulk order, please expect delays in fulfillment.<br><a href="https://tamu.mybigcommerce.com/faqs/#:~:text=How%20do%20you%20place%20a%20bulk%20order%3F" target="_blank" rel="noopener noreferrer">Click here</a> to learn more. <br><br>`;
                     } else if (inputValue > stockNumber) {
-                        // Non-closeout exceeded-stock case: partial fulfillment allowed
                         const exceededQuantity = inputValue - stockNumber;
                         message = `You have exceeded our in-stock quantity by ${exceededQuantity}.<br>We will fulfill a portion of your order now, but expect a delay in complete order fulfillment.`;
                     } else {
-                        message = `In stock. <br><br><br>`;
+                        message = `In stock. <br><br>`;
                     }
-                    // === PATCH END ===
 
-                    // Update the message using the real DOM element
                     updateStockMessageInElement(message);
 
-                    // Handle the Add to Cart button state
                     if (addToCartButton && disableButton) {
                         addToCartButton.disabled = true;
                         addToCartButton.style.backgroundColor = 'grey';
@@ -133,11 +152,13 @@ function displayStockNumber() {
                 clearInterval(intervalId);
                 console.log("Paused updates.");
             }
+
             // Resume updating the message
             function resumeUpdating() {
                 intervalId = setInterval(checkAndUpdateInputValue, 50);
                 console.log("Resumed updates.");
             }
+
             // Initialize the interval for updates
             intervalId = setInterval(checkAndUpdateInputValue, 50);
 
@@ -145,6 +166,7 @@ function displayStockNumber() {
             function handleSKUChange() {
                 checkAndUpdateInputValue();
             }
+
             // Initialize with the first SKU check
             handleSKUChange();
 
@@ -161,9 +183,7 @@ function displayStockNumber() {
             console.error('Error fetching the JSON file:', error);
         });
 }
-document.addEventListener('DOMContentLoaded', function () {
-    displayStockNumber();
-});
+
 // Function to disable text highlighting
 function disableTextHighlighting() {
     const addToCartButton = document.querySelector('#form-action-addToCart');
@@ -171,14 +191,17 @@ function disableTextHighlighting() {
         console.error("Add to Cart button not found.");
         return;
     }
+
     function disableHighlighting() {
         document.body.style.userSelect = 'none';
         setTimeout(() => {
             document.body.style.userSelect = '';
         }, 5000);
     }
+
     addToCartButton.addEventListener('click', disableHighlighting);
 }
+
 function makeStockFieldVisible() {
     const stockField = document.querySelector('.form-field.form-field--stock');
     if (stockField) {
@@ -200,11 +223,12 @@ function makeStockFieldVisible() {
         console.error("Stock field element not found.");
     }
 }
-// Modify the `DOMContentLoaded` event listener to include the updated function
+
+// Run all front-end stock behaviors once the page is ready.
+// Note: the original pasted script called displayStockNumber() in two DOMContentLoaded listeners.
+// This version consolidates that into one listener so the stock-check interval does not run twice.
 document.addEventListener('DOMContentLoaded', function () {
     displayStockNumber();
     disableTextHighlighting();
-    // Call the function to conditionally make the stock field visible
     makeStockFieldVisible();
 });
-
